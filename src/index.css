@@ -1,0 +1,226 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-ink-950: #07070d;
+  --color-ink-900: #0c0c16;
+  --color-ink-850: #10101c;
+  --color-ink-800: #161626;
+  --color-ink-700: #22223a;
+  --color-ink-600: #33334f;
+  --color-brand: #8b5cf6;
+  --color-brand-2: #22d3ee;
+  --color-brand-3: #f472b6;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: #e7e7f2;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Ambient background */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, rgba(139, 92, 246, 0.18), transparent 60%),
+    radial-gradient(50rem 35rem at 110% 10%, rgba(34, 211, 238, 0.12), transparent 60%),
+    radial-gradient(40rem 30rem at 50% 120%, rgba(244, 114, 182, 0.1), transparent 60%),
+    var(--color-ink-950);
+}
+.app-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+@layer components {
+  .glass {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+  }
+  .glass-hover {
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  }
+  .glass-hover:hover {
+    transform: translateY(-2px);
+    border-color: rgba(139, 92, 246, 0.45);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    padding: 0.625rem 1.1rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: transform 0.12s ease, filter 0.2s ease, background 0.2s ease, border-color 0.2s;
+    cursor: pointer;
+    user-select: none;
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    color: white;
+    background: linear-gradient(135deg, #8b5cf6, #6366f1 55%, #22d3ee);
+    box-shadow: 0 10px 30px -10px rgba(139, 92, 246, 0.7);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.12);
+  }
+  .btn-ghost {
+    color: #e7e7f2;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.09);
+  }
+  .btn-danger {
+    color: white;
+    background: linear-gradient(135deg, #f43f5e, #e11d48);
+  }
+
+  .input {
+    width: 100%;
+    border-radius: 0.75rem;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.6rem 0.9rem;
+    color: white;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input:focus {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .text-gradient {
+    background: linear-gradient(90deg, #c4b5fd, #67e8f9 60%, #f9a8d4);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Tetris board chrome */
+  .board-frame {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.25));
+    border: 2px solid var(--frame);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 28px var(--glow), inset 0 0 18px rgba(0, 0, 0, 0.5);
+  }
+  .panel-box {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid color-mix(in srgb, var(--frame) 70%, transparent);
+  }
+  .garbage-meter {
+    background: linear-gradient(0deg, #f43f5e, #fb923c);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+    transition: height 0.15s ease;
+  }
+  .garbage-meter[data-hot="1"] {
+    animation: meter-pulse 0.5s ease-in-out infinite alternate;
+  }
+
+  .popup {
+    font-weight: 700;
+    font-size: clamp(0.8rem, 2.2vw, 1.05rem);
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+    animation: popup 1.2s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  }
+  .popup-tetris { color: #67e8f9; font-size: clamp(1rem, 3vw, 1.5rem); }
+  .popup-tspin { color: #d8b4fe; font-size: clamp(0.95rem, 2.6vw, 1.3rem); }
+  .popup-pc { color: #fde047; font-size: clamp(1rem, 3vw, 1.5rem); }
+  .popup-b2b { color: #fbbf24; }
+  .popup-combo { color: #f9a8d4; }
+  .popup-garbage { color: #fb7185; }
+  .popup-level { color: #a3e635; }
+  .popup-clear { color: #fff; }
+}
+
+@keyframes popup {
+  0% { opacity: 0; transform: translateY(10px) scale(0.7); }
+  15% { opacity: 1; transform: translateY(0) scale(1.08); }
+  30% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+@keyframes meter-pulse {
+  to { filter: brightness(1.5); }
+}
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-in {
+  animation: float-in 0.35s ease both;
+}
+@keyframes countdown-pop {
+  0% { transform: scale(2.2); opacity: 0; }
+  30% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.9; }
+}
+.countdown {
+  animation: countdown-pop 0.9s ease-out both;
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.6); }
+  100% { box-shadow: 0 0 0 22px rgba(139, 92, 246, 0); }
+}
+.pulse-ring {
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #22223a; border-radius: 999px; border: 2px solid #07070d; }
