@@ -8,7 +8,8 @@ import { GAMES } from "../games/registry";
 import { BoardPreview } from "../games/tetris/Customizer";
 import { fetchLeaderboard } from "../lib/api";
 import { fmtDuration, fmtNum, timeAgo } from "../lib/format";
-import { profileStore, settingsStore, statsStore } from "../lib/store";
+import { useMe } from "../lib/auth";
+import { settingsStore } from "../lib/store";
 
 function greeting() {
   const h = new Date().getHours();
@@ -16,8 +17,9 @@ function greeting() {
 }
 
 export default function Dashboard() {
-  const profile = profileStore.use();
-  const stats = statsStore.use();
+  const me = useMe();
+  const profile = me.user;
+  const stats = me.stats;
   const settings = settingsStore.use();
   const [top, setTop] = useState<EndlessEntry[] | null>(null);
   const [topErr, setTopErr] = useState(false);
@@ -43,10 +45,10 @@ export default function Dashboard() {
               <div className="text-sm text-zinc-400">{greeting()},</div>
             </div>
             <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-5xl">
-              {profile.name}
+              {profile.displayName}
               <span className="text-gradient">.</span>
             </h1>
-            <p className="mt-3 text-zinc-400">Ready to stack? Jump into an endless run or challenge someone to a 2-minute Tetris Battle.</p>
+            <p className="mt-3 text-zinc-400">Ready to stack? Jump into an endless run or challenge someone to a 2-minute battle.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link to="/games/tetris/battle" className="btn btn-primary">
                 <IconSwords width={18} height={18} /> Battle 1v1
@@ -108,12 +110,12 @@ export default function Dashboard() {
       {/* Recent activity */}
       <section>
         <SectionTitle>Recent activity</SectionTitle>
-        {stats.history.length === 0 ? (
+        {me.history.length === 0 ? (
           <Empty>Your recent games will show up here.</Empty>
         ) : (
           <Card className="divide-y divide-white/5 p-0">
-            {stats.history.slice(0, 6).map((h) => (
-              <div key={h.ts} className="flex items-center gap-4 px-5 py-3 text-sm">
+            {me.history.slice(0, 6).map((h) => (
+              <div key={`${h.mode}-${h.ts}`} className="flex items-center gap-4 px-5 py-3 text-sm">
                 <span className="grid size-9 place-items-center rounded-xl bg-white/5">{h.mode === "battle" ? "⚔️" : "♾️"}</span>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">

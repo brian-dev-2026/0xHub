@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { settingsStore } from "../../lib/store";
-import { COLS, VISIBLE_ROWS, decodeCell, type PieceType } from "./engine";
+import { COLS, VISIBLE_ROWS, decodeCell, type PieceType } from "../../../shared/tetris/engine";
 import { drawField, drawPreview, setupCanvas } from "./render";
 import { SKINS, THEMES, getSkin, getTheme } from "./skins";
 

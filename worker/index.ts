@@ -1,69 +1,358 @@
-import { isValidRoomCode } from "../shared/protocol";
+import { PASSWORD_MIN, USERNAME_RE, isValidRoomCode, type MeResponse } from "../shared/protocol";
+import {
+  SESSION_COOKIE,
+  clearCookie,
+  createSession,
+  deleteSession,
+  dummyVerify,
+  hashPassword,
+  readCookie,
+  sessionCookie,
+  userIdForToken,
+  verifyPassword,
+} from "./auth";
+import {
+  ACCENTS,
+  AVATARS,
+  cleanup,
+  createUser,
+  deleteAccount,
+  getHighScores,
+  getHistory,
+  getSettings,
+  getStats,
+  getUser,
+  getUserByUsername,
+  rateLimit,
+  revokeSessions,
+  saveSettings,
+  setPassword,
+  toPublic,
+  topBattle,
+  topEndless,
+  touchUser,
+  updateProfile,
+  upgradeGuest,
+  type UserRow,
+} from "./db";
+import { sha256 } from "./auth";
 import type { Env } from "./env";
 
 export { Matchmaker } from "./matchmaker";
 export { BattleRoom } from "./room";
-export { Leaderboard } from "./leaderboard";
+export { EndlessRun } from "./endless";
 
-const json = (data: unknown, status = 200) =>
+const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      ...headers,
+    },
   });
+const err = (message: string, status = 400) => json({ error: message }, status);
 
-function leaderboard(env: Env) {
-  return env.LEADERBOARD.get(env.LEADERBOARD.idFromName("global"));
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+
+function clientIp(request: Request): string {
+  return request.headers.get("CF-Connecting-IP") ?? "local";
+}
+
+async function limit(env: Env, key: string, max: number, windowMs: number) {
+  const wait = await rateLimit(env.DB, key, max, windowMs);
+  if (wait) throw new HttpError(`Too many attempts. Try again in ${wait > 90 ? `${Math.ceil(wait / 60)} minutes` : `${wait} seconds`}.`, 429, { "retry-after": String(wait) });
+}
+
+async function body(request: Request, maxBytes = 16_384): Promise<Record<string, unknown>> {
+  const text = await request.text();
+  if (text.length > maxBytes) throw new HttpError("Request too large", 413);
+  try {
+    const v = JSON.parse(text || "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    throw new HttpError("Invalid JSON", 400);
+  }
+}
+
+class HttpError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public headers: Record<string, string> = {},
+  ) {
+    super(message);
+  }
+}
+
+async function currentUser(request: Request, env: Env): Promise<UserRow | null> {
+  const token = readCookie(request, SESSION_COOKIE);
+  if (!token) return null;
+  const id = await userIdForToken(env.DB, token);
+  return id ? getUser(env.DB, id) : null;
+}
+
+async function requireUser(request: Request, env: Env): Promise<UserRow> {
+  const u = await currentUser(request, env);
+  if (!u) throw new HttpError("Not signed in", 401);
+  return u;
+}
+
+async function me(env: Env, u: UserRow): Promise<MeResponse> {
+  const [stats, history, highScores, settings] = await Promise.all([
+    getStats(env.DB, u),
+    getHistory(env.DB, u.id),
+    getHighScores(env.DB, u.id),
+    getSettings(env.DB, u.id),
+  ]);
+  return { user: toPublic(u), stats, history, highScores, settings };
+}
+
+async function startSession(request: Request, env: Env, u: UserRow) {
+  const { token, expiresAt } = await createSession(env.DB, u.id);
+  return json(await me(env, u), 200, { "set-cookie": sessionCookie(request, token, expiresAt) });
+}
+
+function validateCredentials(b: Record<string, unknown>): { username: string; password: string } {
+  const username = typeof b.username === "string" ? b.username.trim() : "";
+  const password = typeof b.password === "string" ? b.password : "";
+  if (!USERNAME_RE.test(username)) throw new HttpError("Username must be 3–20 letters, numbers or underscores.", 400);
+  if (password.length < PASSWORD_MIN) throw new HttpError(`Password must be at least ${PASSWORD_MIN} characters.`, 400);
+  if (password.length > 200) throw new HttpError("Password is too long.", 400);
+  return { username, password };
+}
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const { pathname } = url;
+  const method = request.method;
+
+  // Basic CSRF protection for state-changing requests: the cookie is SameSite=Lax,
+  // and we additionally require same-origin requests.
+  if (method !== "GET" && method !== "HEAD") {
+    const origin = request.headers.get("Origin");
+    if (origin && origin !== url.origin) return err("Cross-origin request blocked", 403);
+  }
+
+  if (pathname === "/api/health") return json({ ok: true });
+
+  // ---------- auth ----------
+
+  if (pathname === "/api/auth/guest" && method === "POST") {
+    const existing = await currentUser(request, env);
+    if (existing) return json(await me(env, existing));
+    await limit(env, `guest-ip:${clientIp(request)}`, 30, HOUR);
+    return startSession(request, env, await createUser(env.DB, {}));
+  }
+
+  if (pathname === "/api/auth/register" && method === "POST") {
+    const b = await body(request);
+    const { username, password } = validateCredentials(b);
+    await limit(env, `register-ip:${clientIp(request)}`, 10, HOUR);
+    if (await getUserByUsername(env.DB, username)) return err("That username is taken.", 409);
+    const passwordHash = await hashPassword(password);
+    const current = await currentUser(request, env);
+    if (current?.is_guest) {
+      // Upgrade the guest in place so their stats and history carry over.
+      try {
+        await upgradeGuest(env.DB, current.id, username, passwordHash);
+      } catch {
+        return err("That username is taken.", 409);
+      }
+      return json(await me(env, (await getUser(env.DB, current.id))!));
+    }
+    let user: UserRow;
+    try {
+      user = await createUser(env.DB, { username, passwordHash });
+    } catch {
+      return err("That username is taken.", 409);
+    }
+    return startSession(request, env, user);
+  }
+
+  if (pathname === "/api/auth/login" && method === "POST") {
+    const b = await body(request);
+    const username = typeof b.username === "string" ? b.username.trim() : "";
+    const password = typeof b.password === "string" ? b.password : "";
+    if (!username || !password || password.length > 200) return err("Wrong username or password.", 401);
+    // Throttle both per network and per account, so neither spraying many
+    // accounts nor hammering one account works.
+    await limit(env, `login-ip:${clientIp(request)}`, 30, 10 * MIN);
+    await limit(env, `login-user:${username.toLowerCase()}`, 10, 15 * MIN);
+    const user = await getUserByUsername(env.DB, username);
+    if (!user?.password_hash) {
+      await dummyVerify(password);
+      return err("Wrong username or password.", 401);
+    }
+    if (!(await verifyPassword(password, user.password_hash))) return err("Wrong username or password.", 401);
+    await touchUser(env.DB, user.id);
+    return startSession(request, env, user);
+  }
+
+  if (pathname === "/api/auth/logout" && method === "POST") {
+    const token = readCookie(request, SESSION_COOKIE);
+    if (token) await deleteSession(env.DB, token);
+    return json({ ok: true }, 200, { "set-cookie": clearCookie(request) });
+  }
+
+  // ---------- current user ----------
+
+  if (pathname === "/api/me" && method === "GET") {
+    const u = await currentUser(request, env);
+    if (!u) return err("Not signed in", 401);
+    if (Date.now() - u.last_seen_at > 60_000) await touchUser(env.DB, u.id);
+    return json(await me(env, u));
+  }
+
+  if (pathname === "/api/me" && method === "PATCH") {
+    const u = await requireUser(request, env);
+    const b = await body(request);
+    const patch: { displayName?: string; avatar?: string; color?: string } = {};
+    if (typeof b.displayName === "string") {
+      const n = b.displayName.trim().replace(/\s+/g, " ");
+      if (n.length < 2 || n.length > 20) return err("Display name must be 2–20 characters.");
+      patch.displayName = n;
+    }
+    if (typeof b.avatar === "string") {
+      if (!AVATARS.includes(b.avatar)) return err("Unknown avatar.");
+      patch.avatar = b.avatar;
+    }
+    if (typeof b.color === "string") {
+      if (!ACCENTS.includes(b.color)) return err("Unknown color.");
+      patch.color = b.color;
+    }
+    await updateProfile(env.DB, u.id, patch);
+    return json(await me(env, (await getUser(env.DB, u.id))!));
+  }
+
+  if (pathname === "/api/me/settings" && method === "PUT") {
+    const u = await requireUser(request, env);
+    const text = await request.text();
+    if (text.length > 8_192) return err("Settings too large", 413);
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    } catch {
+      return err("Invalid settings");
+    }
+    await saveSettings(env.DB, u.id, text);
+    return json({ ok: true });
+  }
+
+  if (pathname === "/api/me/password" && method === "POST") {
+    const u = await requireUser(request, env);
+    if (u.is_guest || !u.password_hash) return err("Guests don't have a password yet — create an account first.");
+    const b = await body(request);
+    const current = typeof b.current === "string" ? b.current : "";
+    const next = typeof b.next === "string" ? b.next : "";
+    await limit(env, `password:${u.id}`, 10, HOUR);
+    if (!(await verifyPassword(current, u.password_hash))) return err("Your current password is wrong.", 401);
+    if (next.length < PASSWORD_MIN) return err(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (next.length > 200) return err("Password is too long.");
+    await setPassword(env.DB, u.id, await hashPassword(next));
+    // Sign out every other device.
+    const token = readCookie(request, SESSION_COOKIE);
+    await revokeSessions(env.DB, u.id, token ? await sha256(token) : undefined);
+    return json({ ok: true });
+  }
+
+  if (pathname === "/api/me" && method === "DELETE") {
+    const u = await requireUser(request, env);
+    if (!u.is_guest && u.password_hash) {
+      const b = await body(request);
+      const password = typeof b.password === "string" ? b.password : "";
+      await limit(env, `password:${u.id}`, 10, HOUR);
+      if (!(await verifyPassword(password, u.password_hash))) return err("Your password is wrong.", 401);
+    }
+    await deleteAccount(env.DB, u.id);
+    return json({ ok: true }, 200, { "set-cookie": clearCookie(request) });
+  }
+
+  // ---------- verified endless runs ----------
+
+  if (pathname === "/api/runs/endless/start" && method === "POST") {
+    const u = await requireUser(request, env);
+    const b = await body(request);
+    const startLevel = Math.floor(Number(b.startLevel ?? 1));
+    if (!Number.isInteger(startLevel) || startLevel < 1 || startLevel > 15) return err("Start level must be 1–15.");
+    await limit(env, `run-start:${u.id}`, 120, HOUR);
+    const runId = crypto.randomUUID();
+    const { seed } = await env.ENDLESS_RUN.get(env.ENDLESS_RUN.idFromName(runId)).init(u.id, startLevel);
+    return json({ runId, seed });
+  }
+
+  const runInput = pathname.match(/^\/api\/runs\/endless\/([0-9a-f-]{36})\/input$/);
+  if (runInput && method === "POST") {
+    const u = await requireUser(request, env);
+    const b = await body(request, 2_000_000);
+    const res = await env.ENDLESS_RUN.get(env.ENDLESS_RUN.idFromName(runInput[1])).input(u.id, b);
+    return json(res, res.ok ? 200 : 400);
+  }
+
+  if (pathname === "/api/leaderboard" && method === "GET") {
+    const mode = url.searchParams.get("mode") === "battle" ? "battle" : "endless";
+    return json(mode === "battle" ? await topBattle(env.DB, 50) : await topEndless(env.DB, 50));
+  }
+
+  // ---------- realtime ----------
+
+  const isWs = request.headers.get("Upgrade") === "websocket";
+
+  if (pathname === "/api/ws/matchmake") {
+    if (!isWs) return err("Expected WebSocket", 426);
+    const u = await requireUser(request, env);
+    const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName("global"));
+    return stub.fetch(withUser(request, u));
+  }
+
+  const room = pathname.match(/^\/api\/ws\/room\/([A-Za-z0-9]+)$/);
+  if (room) {
+    if (!isWs) return err("Expected WebSocket", 426);
+    const code = room[1].toUpperCase();
+    if (!isValidRoomCode(code)) return err("Invalid room code");
+    const u = await requireUser(request, env);
+    const stub = env.BATTLE_ROOM.get(env.BATTLE_ROOM.idFromName(`room:${code}`));
+    return stub.fetch(withUser(request, u, code));
+  }
+
+  return err("Not found", 404);
+}
+
+/** Forward the authenticated identity to a Durable Object (only reachable through this Worker). */
+function withUser(request: Request, u: UserRow, room?: string): Request {
+  const headers = new Headers(request.headers);
+  headers.set(
+    "X-0xHub-User",
+    JSON.stringify({ id: u.id, name: u.display_name, avatar: u.avatar, color: u.color, rating: u.rating }),
+  );
+  if (room) headers.set("X-0xHub-Room", room);
+  return new Request(request, { headers });
 }
 
 export default {
   async fetch(request, env): Promise<Response> {
-    const url = new URL(request.url);
-    const { pathname } = url;
-
-    if (pathname === "/api/health") return json({ ok: true });
-
-    // Quick match queue (single global matchmaker).
-    if (pathname === "/api/ws/matchmake") {
-      if (request.headers.get("Upgrade") !== "websocket") return json({ error: "Expected WebSocket" }, 426);
-      const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName("global"));
-      return stub.fetch(request);
-    }
-
-    // Battle room, either from quick match or a private invite code.
-    const room = pathname.match(/^\/api\/ws\/room\/([A-Za-z0-9]+)$/);
-    if (room) {
-      if (request.headers.get("Upgrade") !== "websocket") return json({ error: "Expected WebSocket" }, 426);
-      const code = room[1].toUpperCase();
-      if (!isValidRoomCode(code)) return json({ error: "Invalid room code" }, 400);
-      const stub = env.BATTLE_ROOM.get(env.BATTLE_ROOM.idFromName(`room:${code}`));
-      return stub.fetch(request);
-    }
-
-    if (pathname === "/api/leaderboard" && request.method === "GET") {
-      const mode = url.searchParams.get("mode") === "battle" ? "battle" : "endless";
-      const lb = leaderboard(env);
-      return json(mode === "battle" ? await lb.topBattle(50) : await lb.topEndless(50));
-    }
-
-    if (pathname === "/api/leaderboard/endless" && request.method === "POST") {
-      let body: Record<string, unknown>;
-      try {
-        body = await request.json();
-      } catch {
-        return json({ error: "Invalid JSON" }, 400);
+    const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/")) return new Response(null, { status: 404 }); // static assets handle the rest
+    let res: Response;
+    try {
+      res = await route(request, env);
+    } catch (e) {
+      if (e instanceof HttpError) res = json({ error: e.message }, e.status, e.headers);
+      else {
+        console.error(e);
+        res = err("Server error", 500);
       }
-      const result = await leaderboard(env).submitEndless(body);
-      return json(result, result.ok ? 200 : 400);
     }
+    // Always consume the request body, even on early rejections (e.g. 401), so
+    // keep-alive connections stay healthy.
+    if (request.body && !request.bodyUsed) await request.arrayBuffer().catch(() => {});
+    return res;
+  },
 
-    if (pathname === "/api/player" && request.method === "GET") {
-      const id = url.searchParams.get("id") ?? "";
-      return json(await leaderboard(env).playerSummary(id));
-    }
-
-    if (pathname.startsWith("/api/")) return json({ error: "Not found" }, 404);
-
-    // Everything else is served by the static asset handler (SPA fallback).
-    return new Response(null, { status: 404 });
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(cleanup(env.DB));
   },
 } satisfies ExportedHandler<Env>;

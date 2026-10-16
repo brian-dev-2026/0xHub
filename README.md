@@ -8,7 +8,8 @@ A modern gaming hub. First title: **Tetris Battle**, with an Endless mode and a 
 | --- | --- | --- |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 | Fast dev loop, small bundle; the game renders on `<canvas>` |
 | Realtime | WebSockets on Cloudflare Durable Objects | One Durable Object per match keeps both sockets and the match state in a single place |
-| Database | Durable Object SQLite storage | Built into the leaderboard object, free tier, nothing extra to set up |
+| Database | Cloudflare D1 (managed SQLite) | Free tier, SQL console and backups in the dashboard; holds every account, setting, run and battle |
+| Auth | Username + password (PBKDF2-SHA256) with HttpOnly session cookies, or guest | No third-party auth service needed |
 | Hosting | Cloudflare Workers (static assets + API in one deploy) | Free plan covers it, and the site and game server deploy together |
 
 **Why not Vercel:** Vercel serverless functions can't hold a WebSocket open, so a live 1v1 would need a paid third-party realtime service. Cloudflare runs the site, the WebSocket server and the database on one free account.
@@ -16,17 +17,36 @@ A modern gaming hub. First title: **Tetris Battle**, with an Endless mode and a 
 ## Project layout
 
 ```
-shared/protocol.ts        Message types shared by client and server
+shared/protocol.ts        Message and API types shared by client and server
 worker/index.ts           HTTP + WebSocket routing (/api/*)
+worker/auth.ts            Password hashing + cookie sessions
+worker/db.ts              All D1 queries: users, settings, runs, battles, leaderboards
 worker/matchmaker.ts      Quick-match queue (Durable Object)
 worker/room.ts            1v1 match referee: clock, garbage routing, KOs, results
-worker/leaderboard.ts     SQLite leaderboard: endless high scores + battle Elo ratings
+migrations/               D1 schema (SQL migrations)
+src/lib/auth.ts           Client session state: login, guest, profile, settings sync
 src/games/tetris/engine.ts   Pure Tetris engine (unit tested)
 src/games/tetris/render.ts   Canvas renderer + block skins
 src/games/tetris/skins.ts    Skin and board-theme definitions
 src/games/tetris/session.ts  Game loop, input, effects
 src/pages/*               Dashboard, Games, Tetris, Endless, Battle, Leaderboard, Profile, Settings
 ```
+
+## Accounts and data
+
+Nothing is stored in the browser except the session cookie. Everything else is in D1:
+
+| Table | Holds |
+| --- | --- |
+| `users` | Accounts and guests: display name, avatar, color, battle rating and W/L/D/KO counters |
+| `sessions` | Login sessions (only a SHA-256 of the token is stored), 30-day sliding expiry |
+| `settings` | Per-user skin, theme, key bindings, handling and audio settings |
+| `endless_runs` | Every endless run (score, lines, level, duration) |
+| `battles` | Every finished 1v1: players, winner, KOs, lines sent and cleared, rating changes |
+
+- **Play as guest** creates a real guest user on the server, so its progress is saved. A guest can create an account from Profile, which upgrades the same user and keeps all stats.
+- **Multiplayer identity** comes from the session cookie on the server. Clients only send their skin, so names and ratings can't be spoofed.
+- Battle results are written by the server (the match referee), not by clients.
 
 ## Tetris mechanics
 
@@ -44,37 +64,44 @@ src/pages/*               Dashboard, Games, Tetris, Endless, Battle, Leaderboard
 - Quick match, or a private room with a 5-character code and a share link
 - Elo rating (starts at 1000) and a global battle leaderboard
 
-**Customization:** 10 block skins (Classic bevel, Flat, Neon, Glass, 8-Bit, Candy, Gems, Wireframe, Monochrome, Sunset) and 8 board themes (Tetris Battle, Midnight, Aurora, Synthwave, Matrix, Ember, Void, Paper), with a live preview.
+**Customization:** 10 block skins (Classic bevel, Flat, Neon, Glass, 8-Bit, Candy, Gems, Wireframe, Monochrome, Sunset) and 8 board themes (Tetris Battle, Midnight, Aurora, Synthwave, Matrix, Ember, Void, Paper), with a live preview. Choices are saved to your account.
 
 ## Develop
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 — runs the Worker + Durable Objects locally too
+npm run dev        # applies migrations to a local D1, then serves http://localhost:5173
 npm test           # engine unit tests
 npm run typecheck
 ```
 
-To test 1v1 locally, open two browser windows and hit **Quick match** in both. Use a private window for one of them so you get two different players.
+To test 1v1 locally, open a normal window and a private window (two separate sessions). Sign in or play as guest in each, then hit **Quick match** in both.
 
 ## Deploy to Cloudflare (free)
 
-1. Create a free account at https://dash.cloudflare.com/sign-up
-2. Log in from this folder (opens your browser once):
+1. Log in from this folder (opens your browser once):
    ```bash
    npx wrangler login
    ```
-3. Deploy:
+2. Deploy:
    ```bash
    npm run deploy
    ```
-   This prints your URL, e.g. `https://0xhub.<your-subdomain>.workers.dev`.
-4. Optional: add a custom domain under Workers & Pages → 0xhub → Settings → Domains & Routes.
+   This builds the app, applies any new D1 migrations to the remote database (the `database_id` in `wrangler.jsonc`), then deploys. It prints your URL, e.g. `https://0xhub.<your-subdomain>.workers.dev`.
+3. Optional: add a custom domain under Workers & Pages → 0xhub → Settings → Domains & Routes.
 
-For automatic deploys on every push, connect the GitHub repo under Workers & Pages → 0xhub → Settings → Builds. Use build command `npm run build` and deploy command `npx wrangler deploy`.
+For automatic deploys on every push, connect the GitHub repo under Workers & Pages → 0xhub → Settings → Builds. Use build command `npm run build` and deploy command `npx wrangler d1 migrations apply DB --remote && npx wrangler deploy`.
+
+To look at the data, open the Cloudflare dashboard → Storage & Databases → D1 → your database → Console, or run:
+
+```bash
+npx wrangler d1 execute DB --remote --command "SELECT display_name, rating FROM users ORDER BY rating DESC LIMIT 10"
+```
 
 ## Known limits / next steps
 
-- Players are guests identified by a random ID in localStorage. Anyone could reuse an ID, and clearing site data creates a new player. Real accounts (e.g. OAuth) would be the next step before treating the leaderboard as competitive.
-- Each client simulates its own board, and the server referees time, garbage and KOs. Endless scores get a basic plausibility check, not full server-side replay validation.
+- No password reset yet (accounts have no email). Adding email, or Google/GitHub sign-in, would allow recovery.
+- Login has no rate limiting yet. Cloudflare's Rate Limiting binding or a Turnstile check would harden it.
+- Guest users that never come back stay in the `users` table. A scheduled cleanup (Cron Trigger) can prune old, empty guests.
+- Each client simulates its own board, and the server referees time, garbage and KOs. Endless scores get plausibility checks, not full server-side replay validation.
 - Switching browser tabs mid-battle pauses your board (browsers throttle background animation), but the match clock keeps running.

@@ -47,7 +47,7 @@ export const THEMES: BoardTheme[] = [
   { id: "aurora", name: "Aurora", bg: ["#04131a", "#0d1b2a"], grid: "rgba(34,211,238,0.08)", gridStyle: "dots", frame: "#155e75", glow: "rgba(34,211,238,0.4)", ghostAlpha: 0.25, text: "#cffafe" },
   { id: "synthwave", name: "Synthwave", bg: ["#1a0526", "#2d0b3a"], grid: "rgba(244,114,182,0.14)", gridStyle: "lines", frame: "#be185d", glow: "rgba(244,114,182,0.45)", ghostAlpha: 0.25, text: "#fce7f3" },
   { id: "matrix", name: "Matrix", bg: ["#010a03", "#03140a"], grid: "rgba(74,222,128,0.10)", gridStyle: "lines", frame: "#166534", glow: "rgba(74,222,128,0.35)", ghostAlpha: 0.22, text: "#dcfce7" },
-  { id: "battle", name: "Tetris Battle", bg: ["#0c1e3c", "#081428"], grid: "rgba(147,197,253,0.10)", gridStyle: "checker", frame: "#3b82f6", glow: "rgba(96,165,250,0.45)", ghostAlpha: 0.3, text: "#dbeafe" },
+  { id: "battle", name: "Arcade Blue", bg: ["#0c1e3c", "#081428"], grid: "rgba(147,197,253,0.10)", gridStyle: "checker", frame: "#3b82f6", glow: "rgba(96,165,250,0.45)", ghostAlpha: 0.3, text: "#dbeafe" },
   { id: "ember", name: "Ember", bg: ["#1c0a04", "#120604"], grid: "rgba(251,146,60,0.08)", gridStyle: "dots", frame: "#9a3412", glow: "rgba(251,146,60,0.4)", ghostAlpha: 0.22, text: "#ffedd5" },
   { id: "void", name: "Void", bg: ["#000000", "#000000"], grid: "rgba(255,255,255,0)", gridStyle: "none", frame: "#27272a", glow: "rgba(255,255,255,0.08)", ghostAlpha: 0.18, text: "#fafafa" },
   { id: "paper", name: "Paper", bg: ["#f5f5f4", "#e7e5e4"], grid: "rgba(0,0,0,0.07)", gridStyle: "lines", frame: "#a8a29e", glow: "rgba(0,0,0,0.12)", ghostAlpha: 0.28, text: "#1c1917" },

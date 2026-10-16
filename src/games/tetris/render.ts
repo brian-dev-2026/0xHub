@@ -1,4 +1,4 @@
-import { COLS, SHAPES, VISIBLE_ROWS, type Cell, type PieceType, PIECES } from "./engine";
+import { COLS, SHAPES, VISIBLE_ROWS, type Cell, type PieceType, PIECES } from "../../../shared/tetris/engine";
 import type { BlockSkin, BoardTheme } from "./skins";
 
 function hexToRgb(hex: string): [number, number, number] {

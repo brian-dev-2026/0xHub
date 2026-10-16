@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { COLS, VISIBLE_ROWS } from "./engine";
+import { COLS, VISIBLE_ROWS } from "../../../shared/tetris/engine";
 import { drawField, drawPreview, setupCanvas } from "./render";
 import { getSkin, getTheme } from "./skins";
 import type { PanelState, Popup } from "./session";

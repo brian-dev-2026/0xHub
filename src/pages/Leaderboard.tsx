@@ -3,12 +3,12 @@ import type { BattleEntry, EndlessEntry } from "../../shared/protocol";
 import { Card, Empty, PageHeader, Segmented } from "../components/ui";
 import { fetchLeaderboard } from "../lib/api";
 import { fmtNum, timeAgo } from "../lib/format";
-import { profileStore } from "../lib/store";
+import { useMe } from "../lib/auth";
 
 type Mode = "endless" | "battle";
 
 export default function Leaderboard() {
-  const profile = profileStore.use();
+  const profile = useMe().user;
   const [mode, setMode] = useState<Mode>("endless");
   const [endless, setEndless] = useState<EndlessEntry[] | null>(null);
   const [battle, setBattle] = useState<BattleEntry[] | null>(null);

@@ -1,17 +1,7 @@
 import { useSyncExternalStore } from "react";
 
-// Tiny persisted stores. Each store is a single JSON blob in localStorage.
-
-function load<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return typeof fallback === "object" && fallback && !Array.isArray(fallback) ? { ...fallback, ...parsed } : parsed;
-  } catch {
-    return fallback;
-  }
-}
+// In-memory reactive stores. Nothing is persisted in the browser: the source
+// of truth is the server database (see lib/auth.ts).
 
 export interface Store<T> {
   get(): T;
@@ -20,18 +10,13 @@ export interface Store<T> {
   use(): T;
 }
 
-export function createStore<T extends object>(key: string, initial: T): Store<T> {
-  let state = load(key, initial);
+export function createStore<T extends object>(initial: T): Store<T> {
+  let state = initial;
   const listeners = new Set<() => void>();
   const store: Store<T> = {
     get: () => state,
     set(update) {
-      state = typeof update === "function" ? update(state) : Array.isArray(state) ? (update as T) : { ...state, ...update };
-      try {
-        localStorage.setItem(key, JSON.stringify(state));
-      } catch {
-        /* storage unavailable */
-      }
+      state = typeof update === "function" ? update(state) : { ...state, ...update };
       listeners.forEach((l) => l());
     },
     subscribe(fn) {
@@ -44,35 +29,6 @@ export function createStore<T extends object>(key: string, initial: T): Store<T>
   };
   return store;
 }
-
-// ---------- profile ----------
-
-export const AVATARS = ["🎮", "👾", "🦊", "🐉", "🚀", "⚡", "🔥", "🌙", "🐼", "🦄", "💎", "🎯", "🤖", "🐙", "🍀", "👑"];
-export const ACCENTS = ["#8b5cf6", "#22d3ee", "#f472b6", "#a3e635", "#fb923c", "#f43f5e", "#facc15", "#60a5fa"];
-
-export interface Profile {
-  id: string;
-  name: string;
-  avatar: string;
-  color: string;
-  createdAt: number;
-}
-
-function randomName() {
-  const a = ["Swift", "Neon", "Pixel", "Shadow", "Turbo", "Cosmic", "Lucky", "Iron", "Frost", "Blaze"];
-  const b = ["Fox", "Block", "Spinner", "Stacker", "Comet", "Ninja", "Wolf", "Drop", "Titan", "Owl"];
-  return `${a[Math.floor(Math.random() * a.length)]}${b[Math.floor(Math.random() * b.length)]}${Math.floor(Math.random() * 90 + 10)}`;
-}
-
-export const profileStore = createStore<Profile>("0xhub:profile", {
-  id: crypto.randomUUID(),
-  name: randomName(),
-  avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)],
-  color: ACCENTS[0],
-  createdAt: Date.now(),
-});
-// Persist the generated identity immediately so the id is stable.
-profileStore.set({});
 
 // ---------- settings ----------
 
@@ -97,7 +53,7 @@ export interface Settings {
   das: number;
   /** Auto Repeat Rate, ms (0 = instant) */
   arr: number;
-  /** Soft drop factor (multiplier of gravity), 41 = instant */
+  /** Soft drop factor (multiplier of gravity), >= 41 = instant */
   sdf: number;
   volume: number;
   keys: Record<Action, string[]>;
@@ -115,7 +71,7 @@ export const DEFAULT_KEYS: Record<Action, string[]> = {
   pause: ["Escape", "KeyP"],
 };
 
-export const settingsStore = createStore<Settings>("0xhub:settings", {
+export const DEFAULT_SETTINGS: Settings = {
   skin: "classic",
   theme: "battle",
   ghost: true,
@@ -125,82 +81,20 @@ export const settingsStore = createStore<Settings>("0xhub:settings", {
   volume: 0.5,
   keys: DEFAULT_KEYS,
   reducedMotion: false,
-});
+};
 
-// ---------- stats & history ----------
+export const settingsStore = createStore<Settings>(DEFAULT_SETTINGS);
 
-export interface HistoryEntry {
-  mode: "endless" | "battle";
-  ts: number;
-  score?: number;
-  lines: number;
-  level?: number;
-  result?: "win" | "lose" | "draw";
-  opponent?: string;
-  kos?: number;
-  linesSent?: number;
-  durationMs: number;
-}
-
-export interface Stats {
-  endlessGames: number;
-  bestScore: number;
-  totalLines: number;
-  battles: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  kos: number;
-  playTimeMs: number;
-  history: HistoryEntry[];
-  highScores: { score: number; lines: number; level: number; ts: number }[];
-}
-
-export const statsStore = createStore<Stats>("0xhub:stats", {
-  endlessGames: 0,
-  bestScore: 0,
-  totalLines: 0,
-  battles: 0,
-  wins: 0,
-  losses: 0,
-  draws: 0,
-  kos: 0,
-  playTimeMs: 0,
-  history: [],
-  highScores: [],
-});
-
-export function recordEndless(e: { score: number; lines: number; level: number; durationMs: number }) {
-  statsStore.set((s) => ({
-    ...s,
-    endlessGames: s.endlessGames + 1,
-    bestScore: Math.max(s.bestScore, e.score),
-    totalLines: s.totalLines + e.lines,
-    playTimeMs: s.playTimeMs + e.durationMs,
-    history: [{ mode: "endless" as const, ts: Date.now(), ...e }, ...s.history].slice(0, 30),
-    highScores: [...s.highScores, { score: e.score, lines: e.lines, level: e.level, ts: Date.now() }]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10),
-  }));
-}
-
-export function recordBattle(e: {
-  result: "win" | "lose" | "draw";
-  opponent: string;
-  kos: number;
-  linesSent: number;
-  lines: number;
-  durationMs: number;
-}) {
-  statsStore.set((s) => ({
-    ...s,
-    battles: s.battles + 1,
-    wins: s.wins + (e.result === "win" ? 1 : 0),
-    losses: s.losses + (e.result === "lose" ? 1 : 0),
-    draws: s.draws + (e.result === "draw" ? 1 : 0),
-    kos: s.kos + e.kos,
-    totalLines: s.totalLines + e.lines,
-    playTimeMs: s.playTimeMs + e.durationMs,
-    history: [{ mode: "battle" as const, ts: Date.now(), ...e }, ...s.history].slice(0, 30),
-  }));
+/** Merge settings loaded from the server over the defaults, ignoring unknown/invalid fields. */
+export function applyServerSettings(raw: Record<string, unknown> | null) {
+  if (!raw) {
+    settingsStore.set(DEFAULT_SETTINGS);
+    return;
+  }
+  const next: Settings = { ...DEFAULT_SETTINGS };
+  for (const k of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
+    if (k in raw && typeof raw[k] === typeof DEFAULT_SETTINGS[k]) (next as unknown as Record<string, unknown>)[k] = raw[k];
+  }
+  next.keys = { ...DEFAULT_KEYS, ...(next.keys ?? {}) };
+  settingsStore.set(next);
 }

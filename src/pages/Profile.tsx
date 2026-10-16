@@ -1,82 +1,115 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router";
+import { ACCENTS, AVATARS } from "../../shared/protocol";
+import { AuthForm } from "../components/AuthGate";
 import { Avatar } from "../components/Layout";
 import { Card, PageHeader, SectionTitle, StatTile } from "../components/ui";
-import { fetchPlayerSummary } from "../lib/api";
+import { logout, updateProfile, useMe } from "../lib/auth";
 import { fmtDuration, fmtNum } from "../lib/format";
-import { ACCENTS, AVATARS, profileStore, statsStore } from "../lib/store";
 
 export default function Profile() {
-  const profile = profileStore.use();
-  const stats = statsStore.use();
-  const [name, setName] = useState(profile.name);
-  const [saved, setSaved] = useState(false);
-  const [rating, setRating] = useState<number | null>(null);
+  const { user, stats } = useMe();
+  const navigate = useNavigate();
+  const [name, setName] = useState(user.displayName);
+  const [status, setStatus] = useState<"" | "saving" | "saved" | string>("");
 
-  useEffect(() => {
-    fetchPlayerSummary(profile.id)
-      .then((s) => setRating(s.battle?.rating ?? null))
-      .catch(() => {});
-  }, [profile.id]);
+  const save = async (patch: Parameters<typeof updateProfile>[0]) => {
+    setStatus("saving");
+    try {
+      await updateProfile(patch);
+      setStatus("saved");
+      setTimeout(() => setStatus(""), 1500);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Couldn't save");
+    }
+  };
 
-  const saveName = () => {
-    const n = name.trim().slice(0, 20);
-    if (!n) return;
-    profileStore.set({ name: n });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+  const signOut = async () => {
+    if (user.isGuest && !confirm("You're a guest — signing out means you can't get back into this profile. Sign out anyway?")) return;
+    await logout();
+    navigate("/");
   };
 
   return (
     <>
-      <PageHeader title="Profile" subtitle="How other players see you." />
+      <PageHeader
+        title="Profile"
+        subtitle="How other players see you."
+        action={<button className="btn btn-ghost" onClick={signOut}>Sign out</button>}
+      />
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <Avatar emoji={profile.avatar} color={profile.color} size={88} />
-            <div className="text-xl font-bold">{profile.name}</div>
-            <div className="chip">{rating !== null ? `Battle rating ${rating}` : "Unranked in battle"}</div>
-          </div>
-          <div className="mt-4 space-y-5">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Display name</label>
-              <div className="flex gap-2">
-                <input className="input" value={name} maxLength={20} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveName()} />
-                <button className="btn btn-primary" onClick={saveName}>{saved ? "Saved" : "Save"}</button>
+        <div className="space-y-6 lg:col-span-1">
+          <Card>
+            <div className="flex flex-col items-center gap-3 py-4 text-center">
+              <Avatar emoji={user.avatar} color={user.color} size={88} />
+              <div>
+                <div className="text-xl font-bold">{user.displayName}</div>
+                <div className="text-sm text-zinc-500">{user.isGuest ? "Guest player" : `@${user.username}`}</div>
               </div>
+              <div className="chip">Battle rating {user.rating}</div>
             </div>
-            <div>
-              <div className="mb-1.5 text-xs font-semibold text-zinc-400">Avatar</div>
-              <div className="grid grid-cols-8 gap-1.5">
-                {AVATARS.map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => profileStore.set({ avatar: a })}
-                    className={`grid aspect-square place-items-center rounded-lg text-lg transition ${profile.avatar === a ? "bg-violet-500/25 ring-2 ring-violet-400" : "bg-white/5 hover:bg-white/10"}`}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="mb-1.5 text-xs font-semibold text-zinc-400">Accent color</div>
-              <div className="flex flex-wrap gap-2">
-                {ACCENTS.map((c) => (
-                  <button
-                    key={c}
-                    aria-label={c}
-                    onClick={() => profileStore.set({ color: c })}
-                    className={`size-8 rounded-full transition ${profile.color === c ? "ring-2 ring-white ring-offset-2 ring-offset-ink-900" : ""}`}
-                    style={{ background: c }}
+            <div className="mt-4 space-y-5">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-400">Display name</label>
+                <div className="flex gap-2">
+                  <input
+                    className="input"
+                    value={name}
+                    maxLength={20}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && save({ displayName: name })}
                   />
-                ))}
+                  <button className="btn btn-primary" onClick={() => save({ displayName: name })} disabled={name.trim() === user.displayName}>
+                    Save
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div className="mb-1.5 text-xs font-semibold text-zinc-400">Avatar</div>
+                <div className="grid grid-cols-8 gap-1.5">
+                  {AVATARS.map((a) => (
+                    <button
+                      key={a}
+                      onClick={() => save({ avatar: a })}
+                      className={`grid aspect-square place-items-center rounded-lg text-lg transition ${user.avatar === a ? "bg-violet-500/25 ring-2 ring-violet-400" : "bg-white/5 hover:bg-white/10"}`}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1.5 text-xs font-semibold text-zinc-400">Accent color</div>
+                <div className="flex flex-wrap gap-2">
+                  {ACCENTS.map((c) => (
+                    <button
+                      key={c}
+                      aria-label={c}
+                      onClick={() => save({ color: c })}
+                      className={`size-8 rounded-full transition ${user.color === c ? "ring-2 ring-white ring-offset-2 ring-offset-ink-900" : ""}`}
+                      style={{ background: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="h-5 text-xs">
+                {status === "saving" && <span className="text-zinc-400">Saving…</span>}
+                {status === "saved" && <span className="text-emerald-300">Saved</span>}
+                {status && status !== "saving" && status !== "saved" && <span className="text-rose-300">{status}</span>}
               </div>
             </div>
-            <p className="text-xs text-zinc-500">
-              You're playing as a guest. Your identity is stored in this browser — clearing site data creates a new player.
-            </p>
-          </div>
-        </Card>
+          </Card>
+
+          {user.isGuest && (
+            <Card>
+              <div className="mb-1 font-semibold">Keep your progress</div>
+              <p className="mb-4 text-sm text-zinc-400">
+                Guest progress only lives on this device's session. Create an account to keep your stats and play from anywhere.
+              </p>
+              <AuthForm upgrade />
+            </Card>
+          )}
+        </div>
 
         <div className="space-y-6 lg:col-span-2">
           <section>
@@ -96,17 +129,10 @@ export default function Profile() {
               <StatTile label="KOs" value={stats.kos} accent="#f472b6" />
             </div>
           </section>
-          <StatTile label="Time played" value={fmtDuration(stats.playTimeMs)} accent="#fb923c" />
-          <button
-            className="btn btn-ghost text-rose-300"
-            onClick={() => {
-              if (confirm("Reset all local stats and history? Global leaderboard entries are kept.")) {
-                statsStore.set((s) => ({ ...s, endlessGames: 0, bestScore: 0, totalLines: 0, battles: 0, wins: 0, losses: 0, draws: 0, kos: 0, playTimeMs: 0, history: [], highScores: [] }));
-              }
-            }}
-          >
-            Reset local stats
-          </button>
+          <div className="grid grid-cols-2 gap-3">
+            <StatTile label="Time played" value={fmtDuration(stats.playTimeMs)} accent="#fb923c" />
+            <StatTile label="Member since" value={new Date(user.createdAt).toLocaleDateString()} accent="#60a5fa" />
+          </div>
         </div>
       </div>
     </>

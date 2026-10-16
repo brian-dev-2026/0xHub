@@ -7,15 +7,25 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "0xhub",
+      "database_id": "47fcd0ee-f215-4fe7-ae66-c829ce290df2",
+      "migrations_dir": "migrations"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "MATCHMAKER", "class_name": "Matchmaker" },
       { "name": "BATTLE_ROOM", "class_name": "BattleRoom" },
-      { "name": "LEADERBOARD", "class_name": "Leaderboard" }
+      { "name": "ENDLESS_RUN", "class_name": "EndlessRun" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["Matchmaker", "BattleRoom", "Leaderboard"] }
+    { "tag": "v1", "new_sqlite_classes": ["Matchmaker", "BattleRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["EndlessRun"] }
   ],
+  "triggers": { "crons": ["17 3 * * *"] },
   "observability": { "enabled": true }
 }

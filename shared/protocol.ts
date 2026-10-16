@@ -1,7 +1,7 @@
 // Wire protocol shared by the browser client and the Cloudflare Worker.
 // Every message is a JSON object with a `t` discriminator.
 
-export const MATCH_DURATION_MS = 120_000; // Tetris Battle 2P: 2 minute rounds
+export const MATCH_DURATION_MS = 120_000; // Battle 2P: 2 minute rounds
 export const COUNTDOWN_MS = 3_000;
 export const ROOM_CODE_LENGTH = 5;
 
@@ -27,12 +27,22 @@ export interface BoardSnapshot {
   combo: number;
 }
 
+/** Input batch: events since the last batch, as flat [step, code, arg] triplets (see shared/tetris/sim.ts). */
+export interface InputBatch {
+  /** Bumped by the server on every resync; batches from an older epoch are ignored. */
+  epoch: number;
+  /** The client's sim has simulated exactly this many steps when the batch was cut. */
+  upTo: number;
+  ev: number[];
+  /** engine.hash() at upTo, so the server can detect divergence. */
+  h: number;
+}
+
 export type ClientMsg =
-  | { t: "hello"; player: PlayerInfo }
-  | { t: "state"; s: BoardSnapshot }
-  | { t: "attack"; lines: number; label?: string }
-  | { t: "ko" }
+  | { t: "hello"; skin: string }
+  | ({ t: "input" } & InputBatch)
   | { t: "rematch" }
+  | { t: "leave" }
   | { t: "ping"; at: number };
 
 export interface MatchResultStats {
@@ -40,13 +50,39 @@ export interface MatchResultStats {
   linesSent: number;
 }
 
+export interface PendingGarbage {
+  id: number;
+  lines: number;
+}
+
+export type MatchPhase = "waiting" | "countdown" | "playing" | "ended";
+
 export type ServerMsg =
-  | { t: "waiting"; code: string }
+  | { t: "waiting" }
   | { t: "matched"; room: string }
   | { t: "opponent"; player: PlayerInfo }
-  | { t: "countdown"; in: number; duration: number }
+  | { t: "opponentStatus"; connected: boolean }
+  | { t: "countdown"; in: number; duration: number; seed: number; epoch: number }
+  | {
+      /** Sent on (re)connect to a room that already has a match going. */
+      t: "resume";
+      phase: MatchPhase;
+      msUntilStart: number;
+      msRemaining: number;
+      kos: { you: number; opponent: number };
+      sim: unknown | null; // SimState — authoritative copy of your game
+      epoch: number;
+      pending: PendingGarbage[];
+    }
+  | {
+      /** The server's copy of your game disagreed with yours; adopt this one. */
+      t: "resync";
+      sim: unknown; // SimState
+      epoch: number;
+      pending: PendingGarbage[];
+    }
   | { t: "opState"; s: BoardSnapshot }
-  | { t: "garbage"; lines: number; label?: string }
+  | { t: "garbage"; id: number; lines: number; label?: string }
   | { t: "ko"; victim: "you" | "opponent"; you: number; opponent: number }
   | {
       t: "end";
@@ -58,8 +94,18 @@ export type ServerMsg =
     }
   | { t: "rematchRequested" }
   | { t: "opponentLeft" }
-  | { t: "error"; message: string }
+  | { t: "replaced" }
+  | { t: "error"; message: string; fatal?: boolean }
   | { t: "pong"; at: number };
+
+/** Grace period to reconnect before a disconnected player forfeits. */
+export const RECONNECT_GRACE_MS = 15_000;
+/** Garbage must be applied by the receiver within this many steps of being sent. */
+export const GARBAGE_ACK_STEPS = 120;
+/** A player's game is pushed forward by the server if it falls this far behind real time. */
+export const MAX_LAG_STEPS = 180;
+/** How far ahead of real time a client may claim to be. */
+export const MAX_LEAD_STEPS = 90;
 
 export interface EndlessEntry {
   playerId: string;
@@ -94,3 +140,63 @@ export function randomRoomCode(): string {
   for (const n of buf) s += ROOM_ALPHABET[n % ROOM_ALPHABET.length];
   return s;
 }
+
+// ---------- REST API types ----------
+
+export interface PublicUser {
+  id: string;
+  username: string | null;
+  isGuest: boolean;
+  displayName: string;
+  avatar: string;
+  color: string;
+  rating: number;
+  createdAt: number;
+}
+
+export interface UserStats {
+  endlessGames: number;
+  bestScore: number;
+  battles: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  kos: number;
+  totalLines: number;
+  playTimeMs: number;
+}
+
+export interface HistoryEntry {
+  mode: "endless" | "battle";
+  ts: number;
+  durationMs: number;
+  lines: number;
+  score?: number;
+  level?: number;
+  result?: "win" | "lose" | "draw";
+  opponent?: string;
+  kos?: number;
+  linesSent?: number;
+  ratingDelta?: number;
+}
+
+export interface HighScore {
+  score: number;
+  lines: number;
+  level: number;
+  ts: number;
+}
+
+export interface MeResponse {
+  user: PublicUser;
+  stats: UserStats;
+  history: HistoryEntry[];
+  highScores: HighScore[];
+  settings: Record<string, unknown> | null;
+}
+
+export const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+export const PASSWORD_MIN = 8;
+
+export const AVATARS = ["🎮", "👾", "🦊", "🐉", "🚀", "⚡", "🔥", "🌙", "🐼", "🦄", "💎", "🎯", "🤖", "🐙", "🍀", "👑"];
+export const ACCENTS = ["#8b5cf6", "#22d3ee", "#f472b6", "#a3e635", "#fb923c", "#f43f5e", "#facc15", "#60a5fa"];

@@ -3,15 +3,16 @@ import { IconInfinity, IconPalette, IconSwords } from "../components/icons";
 import { Card, PageHeader, SectionTitle, StatTile } from "../components/ui";
 import { Customizer } from "../games/tetris/Customizer";
 import { fmtNum, timeAgo } from "../lib/format";
-import { statsStore } from "../lib/store";
+import { useMe } from "../lib/auth";
 
 export default function TetrisHome() {
-  const stats = statsStore.use();
+  const me = useMe();
+  const stats = me.stats;
   return (
     <div className="space-y-8">
       <PageHeader
-        title={<>Tetris <span className="text-gradient">Battle</span></>}
-        subtitle="Guideline Tetris with Tetris Battle rules: SRS, hold, T-spins, combos and garbage."
+        title={<>Block <span className="text-gradient">Battle</span></>}
+        subtitle="Competitive block stacking: SRS rotation, hold, T-spins, combos and garbage. Every game is verified by the server."
       />
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -64,10 +65,10 @@ export default function TetrisHome() {
       <section>
         <SectionTitle>Personal top 10 · Endless</SectionTitle>
         <Card className="p-2">
-          {stats.highScores.length === 0 ? (
+          {me.highScores.length === 0 ? (
             <div className="p-6 text-center text-sm text-zinc-500">No runs yet.</div>
           ) : (
-            stats.highScores.map((h, i) => (
+            me.highScores.map((h, i) => (
               <div key={h.ts} className="flex items-center gap-4 rounded-xl px-3 py-2 text-sm">
                 <span className="w-6 font-mono font-bold text-zinc-500">{i + 1}</span>
                 <span className="flex-1 font-mono font-bold">{fmtNum(h.score)}</span>

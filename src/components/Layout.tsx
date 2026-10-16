@@ -1,5 +1,5 @@
 import { NavLink, Outlet, Link } from "react-router";
-import { profileStore } from "../lib/store";
+import { useMe } from "../lib/auth";
 import { IconGrid, IconHome, IconSettings, IconTrophy, IconUser } from "./icons";
 
 const NAV = [
@@ -44,7 +44,7 @@ export function Avatar({ emoji, color, size = 36 }: { emoji: string; color: stri
 }
 
 export function Layout() {
-  const profile = profileStore.use();
+  const profile = useMe().user;
   return (
     <div className="min-h-screen">
       <div className="app-bg" />
@@ -72,8 +72,8 @@ export function Layout() {
           <Link to="/profile" className="glass flex items-center gap-3 rounded-2xl p-3 transition hover:border-violet-500/40">
             <Avatar emoji={profile.avatar} color={profile.color} />
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{profile.name}</div>
-              <div className="text-xs text-zinc-500">Guest player</div>
+              <div className="truncate text-sm font-semibold">{profile.displayName}</div>
+              <div className="truncate text-xs text-zinc-500">{profile.isGuest ? "Guest player" : `@${profile.username}`}</div>
             </div>
           </Link>
         </div>

@@ -1,4 +1,5 @@
 import { Route, Routes } from "react-router";
+import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Games from "./pages/Games";
@@ -12,6 +13,7 @@ import NotFound from "./pages/NotFound";
 
 export default function App() {
   return (
+    <AuthGate>
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
@@ -27,5 +29,6 @@ export default function App() {
       <Route path="games/tetris/battle" element={<TetrisBattle />} />
       <Route path="games/tetris/battle/:code" element={<TetrisBattle />} />
     </Routes>
+    </AuthGate>
   );
 }

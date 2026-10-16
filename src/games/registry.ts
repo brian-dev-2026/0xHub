@@ -1,3 +1,6 @@
+/** Display name of the block-stacking game. ("Tetris" is a trademark of The Tetris Company — don't use it.) */
+export const GAME_NAME = "Block Battle";
+
 export interface GameMeta {
   id: string;
   title: string;
@@ -12,7 +15,7 @@ export interface GameMeta {
 export const GAMES: GameMeta[] = [
   {
     id: "tetris",
-    title: "Tetris Battle",
+    title: GAME_NAME,
     tagline: "Stack, spin and bury your rival in garbage.",
     href: "/games/tetris",
     status: "live",

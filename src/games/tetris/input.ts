@@ -3,13 +3,15 @@ import type { Action, Settings } from "../../lib/store";
 /**
  * Keyboard + touch input with guideline-style handling:
  * DAS (delay before auto-repeat), ARR (repeat rate, 0 = teleport to wall)
- * and soft drop factor. Feed it key events and call `update(dt)` each frame.
+ * and soft drop. Feed it key events and call `update(STEP_MS)` once per
+ * simulation step, so auto-shift happens at deterministic steps.
  */
 export interface InputTarget {
   move(dx: number): boolean;
   rotate(dir: 1 | -1): boolean;
   hardDrop(): void;
   holdPiece(): boolean;
+  softDrop(on: boolean): void;
   pause?(): void;
 }
 
@@ -19,7 +21,6 @@ export class InputController {
   private dasTimer = 0;
   private arrTimer = 0;
   private dasCharged = false;
-  enabled = true;
 
   constructor(
     private target: InputTarget,
@@ -33,9 +34,9 @@ export class InputController {
   }
 
   onKeyDown = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     const action = this.actionFor(e.code);
     if (!action) return;
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     e.preventDefault();
     if (e.repeat) return;
     this.press(action);
@@ -51,7 +52,7 @@ export class InputController {
       this.target.pause?.();
       return;
     }
-    if (!this.enabled) return;
+    if (this.held.has(action)) return;
     this.held.add(action);
     switch (action) {
       case "left":
@@ -64,6 +65,9 @@ export class InputController {
         this.target.move(d);
         break;
       }
+      case "soft":
+        this.target.softDrop(true);
+        break;
       case "cw":
         this.target.rotate(1);
         break;
@@ -80,7 +84,8 @@ export class InputController {
   }
 
   release(action: Action) {
-    this.held.delete(action);
+    if (!this.held.delete(action)) return;
+    if (action === "soft") this.target.softDrop(false);
     if (action === "left" || action === "right") {
       // Fall back to the other direction if it's still held.
       const other = action === "left" ? "right" : "left";
@@ -92,17 +97,9 @@ export class InputController {
     }
   }
 
-  get softDropping(): boolean {
-    return this.enabled && this.held.has("soft");
-  }
-
-  /** Soft drop factor to hand to the engine tick (0 = not soft dropping). */
-  softDropFactor(): number {
-    return this.softDropping ? this.getSettings().sdf : 0;
-  }
-
+  /** Advance auto-shift by one simulation step. */
   update(dt: number) {
-    if (!this.enabled || this.dir === 0) return;
+    if (this.dir === 0) return;
     const { das, arr } = this.getSettings();
     if (!this.dasCharged) {
       this.dasTimer += dt;
@@ -127,6 +124,7 @@ export class InputController {
   }
 
   releaseAll() {
+    if (this.held.has("soft")) this.target.softDrop(false);
     this.held.clear();
     this.dir = 0;
   }
