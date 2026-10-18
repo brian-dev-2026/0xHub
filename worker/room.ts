@@ -229,7 +229,7 @@ export class BattleRoom extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     let user: Identity;
     try {
-      user = JSON.parse(request.headers.get("X-0xHub-User") ?? "");
+      user = JSON.parse(decodeURIComponent(request.headers.get("X-0xHub-User") ?? ""));
       if (!user?.id) throw new Error();
     } catch {
       return new Response("Unauthorized", { status: 401 });

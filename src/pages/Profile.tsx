@@ -4,7 +4,8 @@ import { ACCENTS, AVATARS } from "../../shared/protocol";
 import { AuthForm } from "../components/AuthGate";
 import { Avatar } from "../components/Layout";
 import { Card, PageHeader, SectionTitle, StatTile } from "../components/ui";
-import { logout, updateProfile, useMe } from "../lib/auth";
+import { PASSWORD_MIN } from "../../shared/protocol";
+import { changePassword, deleteAccount, logout, updateProfile, useMe } from "../lib/auth";
 import { fmtDuration, fmtNum } from "../lib/format";
 
 export default function Profile() {
@@ -109,6 +110,9 @@ export default function Profile() {
               <AuthForm upgrade />
             </Card>
           )}
+
+          {!user.isGuest && <ChangePassword />}
+          <DeleteAccount isGuest={user.isGuest} />
         </div>
 
         <div className="space-y-6 lg:col-span-2">
@@ -136,5 +140,90 @@ export default function Profile() {
         </div>
       </div>
     </>
+  );
+}
+
+function ChangePassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirmNext, setConfirmNext] = useState("");
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatus(null);
+    if (next.length < PASSWORD_MIN) return setStatus({ ok: false, msg: `Use at least ${PASSWORD_MIN} characters.` });
+    if (next !== confirmNext) return setStatus({ ok: false, msg: "New passwords don't match." });
+    setBusy(true);
+    try {
+      await changePassword(current, next);
+      setStatus({ ok: true, msg: "Password changed. Other devices were signed out." });
+      setCurrent("");
+      setNext("");
+      setConfirmNext("");
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : "Couldn't change password." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="mb-3 font-semibold">Change password</div>
+      <form onSubmit={submit} className="space-y-3">
+        <input className="input" type="password" autoComplete="current-password" placeholder="Current password" aria-label="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+        <input className="input" type="password" autoComplete="new-password" placeholder="New password" aria-label="New password" value={next} onChange={(e) => setNext(e.target.value)} required />
+        <input className="input" type="password" autoComplete="new-password" placeholder="Confirm new password" aria-label="Confirm new password" value={confirmNext} onChange={(e) => setConfirmNext(e.target.value)} required />
+        {status && <div role="status" className={`text-sm ${status.ok ? "text-emerald-300" : "text-rose-300"}`}>{status.msg}</div>}
+        <button className="btn btn-ghost w-full" disabled={busy}>{busy ? "Saving…" : "Update password"}</button>
+      </form>
+    </Card>
+  );
+}
+
+function DeleteAccount({ isGuest }: { isGuest: boolean }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const confirmDelete = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      await deleteAccount(isGuest ? undefined : password);
+      navigate("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete the account.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="border-rose-500/20">
+      <div className="font-semibold text-rose-200">Delete account</div>
+      <p className="mt-1 text-sm text-zinc-400">
+        Permanently removes your profile, settings and endless runs. Past battles stay in opponents' history as "Deleted player".
+      </p>
+      {!open ? (
+        <button className="btn btn-ghost mt-4 w-full text-rose-300" onClick={() => setOpen(true)}>Delete my account…</button>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {!isGuest && (
+            <input className="input" type="password" autoComplete="current-password" placeholder="Confirm with your password" aria-label="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          )}
+          {error && <div role="alert" className="text-sm text-rose-300">{error}</div>}
+          <div className="flex gap-2">
+            <button className="btn btn-danger flex-1" onClick={confirmDelete} disabled={busy || (!isGuest && !password)}>
+              {busy ? "Deleting…" : "Delete forever"}
+            </button>
+            <button className="btn btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

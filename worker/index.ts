@@ -324,9 +324,10 @@ async function route(request: Request, env: Env): Promise<Response> {
 /** Forward the authenticated identity to a Durable Object (only reachable through this Worker). */
 function withUser(request: Request, u: UserRow, room?: string): Request {
   const headers = new Headers(request.headers);
+  // Header values must be ASCII; names and avatars can contain emoji, so percent-encode.
   headers.set(
     "X-0xHub-User",
-    JSON.stringify({ id: u.id, name: u.display_name, avatar: u.avatar, color: u.color, rating: u.rating }),
+    encodeURIComponent(JSON.stringify({ id: u.id, name: u.display_name, avatar: u.avatar, color: u.color, rating: u.rating })),
   );
   if (room) headers.set("X-0xHub-Room", room);
   return new Request(request, { headers });

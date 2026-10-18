@@ -43,10 +43,22 @@ function setMe(me: MeResponse, loadSettings = false) {
 }
 
 export async function loadMe() {
-  try {
-    setMe(await api<MeResponse>("/api/me"), true);
-  } catch (e) {
-    authStore.set({ status: e instanceof ApiError && e.status === 401 ? "signedOut" : "offline", me: null });
+  // Retry transient failures (network blips, 5xx) before showing the offline screen.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      setMe(await api<MeResponse>("/api/me"), true);
+      return;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        authStore.set({ status: "signedOut", me: null });
+        return;
+      }
+      if (attempt >= 2) {
+        authStore.set({ status: "offline", me: null });
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    }
   }
 }
 

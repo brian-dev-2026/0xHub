@@ -1,107 +1,126 @@
 # 0xHub
 
-A modern gaming hub. First title: **Tetris Battle**, with an Endless mode and a real-time 1v1 Battle mode modeled on Facebook's Tetris Battle 2P.
+A modern gaming hub. First title: **Block Battle**, a competitive block-stacking game with an Endless mode and a real-time 1v1 Battle mode in the style of the classic Facebook 2P battle game.
+
+> The name "Tetris" is a trademark of The Tetris Company, so the game is called Block Battle. The display name is one constant: `GAME_NAME` in `src/games/registry.ts`.
 
 ## Stack
 
 | Layer | Choice | Why |
 | --- | --- | --- |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 | Fast dev loop, small bundle; the game renders on `<canvas>` |
-| Realtime | WebSockets on Cloudflare Durable Objects | One Durable Object per match keeps both sockets and the match state in a single place |
-| Database | Cloudflare D1 (managed SQLite) | Free tier, SQL console and backups in the dashboard; holds every account, setting, run and battle |
-| Auth | Username + password (PBKDF2-SHA256) with HttpOnly session cookies, or guest | No third-party auth service needed |
+| Realtime | WebSockets on Cloudflare Durable Objects (hibernation API) | One Durable Object per match is the authoritative referee |
+| Database | Cloudflare D1 (managed SQLite) | Accounts, sessions, settings, runs, battles, rate limits |
+| Auth | Username + password (PBKDF2-SHA256), HttpOnly cookie sessions, or guest | No third-party auth service needed |
 | Hosting | Cloudflare Workers (static assets + API in one deploy) | Free plan covers it, and the site and game server deploy together |
 
-**Why not Vercel:** Vercel serverless functions can't hold a WebSocket open, so a live 1v1 would need a paid third-party realtime service. Cloudflare runs the site, the WebSocket server and the database on one free account.
+**Why not Vercel:** Vercel serverless functions can't hold a WebSocket open, so a live 1v1 would need a paid third-party realtime service.
+
+## How fair play works
+
+The browser never reports results. It only sends **inputs**, and the server replays them:
+
+- `shared/tetris/` holds a deterministic engine that runs in both the browser and the Worker. It uses fixed 1/60-second steps, a seeded RNG, and no `Math.random`, `Math.pow` or clock reads. The same seed plus the same inputs at the same steps always produce the same game.
+- **Battle:** each match is a `BattleRoom` Durable Object. Clients send batches of `[step, input]` events about 20 times a second, with a hash of their state. The room replays them on its own copy of each game, then:
+  - computes every attack, garbage line and KO itself;
+  - routes garbage to the opponent, who must apply it within 2 seconds or the server applies it for them;
+  - resyncs a client whose hash doesn't match;
+  - runs forward a client that falls more than 3 seconds behind real time, so stalling gains nothing;
+  - rejects clients that claim to be ahead of real time.
+- **Endless:** the server issues the seed (`EndlessRun` Durable Object). The client streams inputs every 5 seconds, and the server replays them and records **its own** score. Runs that are ahead of real time, malformed, or don't match are rejected.
+- What this does **not** stop: a bot that plays well using legitimate inputs. Verification proves a game was played by the rules, not by a human.
+
+## Reliability
+
+- **Reconnect:** if a battle connection drops, the client reconnects automatically. The seat is held for 15 seconds and the player resumes from the server's state. Leaving on purpose forfeits immediately.
+- **Deploys and restarts:** match state is persisted in Durable Object storage every few seconds and on key events, and the round clock uses Durable Object alarms. A restart costs at most a few seconds of rollback, not the match.
+- **Background tabs:** the game keeps running even when the browser throttles animation in a background tab.
+- **Two tabs:** opening the same match in another tab takes over the seat. The matchmaker never pairs you with yourself.
+
+## Security
+
+- Passwords are hashed with PBKDF2-SHA256 (100k iterations, per-user salt) and compared in constant time. Sessions are random 256-bit tokens; only their SHA-256 is stored. Cookies are `HttpOnly; SameSite=Lax; Secure` (on HTTPS), with a 30-day sliding expiry. Changing your password signs out your other devices.
+- Rate limits are stored in D1:
+  - sign-in: 30 per IP per 10 minutes, and 10 per account per 15 minutes
+  - sign-up: 10 per IP per hour
+  - guest creation: 30 per IP per hour
+  - starting endless runs: 120 per account per hour
+- State-changing requests are checked for a same-origin `Origin` header. Request bodies are size-limited, and WebSocket messages are limited in size (64 KB) and rate (120 per second).
+- Security headers (`public/_headers`): a strict CSP, `X-Frame-Options: DENY`, `nosniff`, HSTS, and Referrer and Permissions policies.
+- Account deletion removes your profile, settings, sessions and runs. Battles stay in opponents' history under "Deleted player".
+- A nightly cron cleans up expired sessions, old rate-limit rows, and guests inactive for 30 days who never finished a game.
+
+## Data (D1)
+
+| Table | Holds |
+| --- | --- |
+| `users` | Accounts and guests: display name, avatar, color, rating, W/L/D/KO counters |
+| `sessions` | Session token hashes with expiry |
+| `settings` | Per-user skin, theme, keys, handling, audio |
+| `endless_runs` | Every verified endless run |
+| `battles` | Every finished 1v1: players, winner, KOs, lines, rating changes |
+| `rate_limits` | Fixed-window counters |
+
+Nothing is stored in the browser except the session cookie.
+
+## Game rules
+
+- SRS rotation with full wall kicks, 7-bag, hold (once per piece), 5-piece preview, ghost piece
+- 500 ms lock delay with move reset (15 resets max)
+- T-spins (3-corner rule, including minis), back-to-back, combos, perfect clears
+- Battle: 2-minute rounds. Topping out gives your opponent a KO and your field resets. Most KOs wins; ties go to whoever sent more lines.
+- Garbage sent: Double 1, Triple 2, Quad 4, T-Spin Single/Double/Triple 2/4/6, Back-to-Back +1, Combo +1…+5, Perfect Clear +10. Your clears cancel incoming garbage first.
+- Customization: 10 block skins and 8 board themes, saved to your account.
 
 ## Project layout
 
 ```
-shared/protocol.ts        Message and API types shared by client and server
-worker/index.ts           HTTP + WebSocket routing (/api/*)
-worker/auth.ts            Password hashing + cookie sessions
-worker/db.ts              All D1 queries: users, settings, runs, battles, leaderboards
-worker/matchmaker.ts      Quick-match queue (Durable Object)
-worker/room.ts            1v1 match referee: clock, garbage routing, KOs, results
-migrations/               D1 schema (SQL migrations)
-src/lib/auth.ts           Client session state: login, guest, profile, settings sync
-src/games/tetris/engine.ts   Pure Tetris engine (unit tested)
-src/games/tetris/render.ts   Canvas renderer + block skins
-src/games/tetris/skins.ts    Skin and board-theme definitions
-src/games/tetris/session.ts  Game loop, input, effects
-src/pages/*               Dashboard, Games, Tetris, Endless, Battle, Leaderboard, Profile, Settings
+shared/protocol.ts           Message + API types shared by client and server
+shared/tetris/engine.ts      Deterministic engine (unit tested)
+shared/tetris/sim.ts         Fixed-step player simulation, input codes, replay helpers
+worker/index.ts              HTTP routes, auth, rate limits, cron
+worker/room.ts               BattleRoom: authoritative 1v1 referee
+worker/endless.ts            EndlessRun: incremental run verification
+worker/matchmaker.ts         Quick-match queue
+worker/db.ts, worker/auth.ts D1 queries; password hashing + sessions
+migrations/                  D1 schema
+src/games/tetris/            Client session, input, renderer, skins, battle client
+src/pages/                   Dashboard, Games, game home, Endless, Battle, Leaderboard, Profile, Settings
 ```
-
-## Accounts and data
-
-Nothing is stored in the browser except the session cookie. Everything else is in D1:
-
-| Table | Holds |
-| --- | --- |
-| `users` | Accounts and guests: display name, avatar, color, battle rating and W/L/D/KO counters |
-| `sessions` | Login sessions (only a SHA-256 of the token is stored), 30-day sliding expiry |
-| `settings` | Per-user skin, theme, key bindings, handling and audio settings |
-| `endless_runs` | Every endless run (score, lines, level, duration) |
-| `battles` | Every finished 1v1: players, winner, KOs, lines sent and cleared, rating changes |
-
-- **Play as guest** creates a real guest user on the server, so its progress is saved. A guest can create an account from Profile, which upgrades the same user and keeps all stats.
-- **Multiplayer identity** comes from the session cookie on the server. Clients only send their skin, so names and ratings can't be spoofed.
-- Battle results are written by the server (the match referee), not by clients.
-
-## Tetris mechanics
-
-- SRS rotation with full wall-kick tables, 7-bag randomizer, hold (once per piece), 5-piece next queue, ghost piece
-- Lock delay of 500 ms with move reset (15 resets max)
-- T-spin detection (3-corner rule, including minis), back-to-back, combos, perfect clears
-- Configurable DAS, ARR and soft-drop speed; key remapping
-
-**Battle 2P rules (Tetris Battle style)**
-
-- 2-minute rounds. Topping out gives your opponent a KO and your field resets. Most KOs wins; ties go to whoever sent more lines.
-- Garbage sent: Double 1, Triple 2, Tetris 4, T-Spin Single/Double/Triple 2/4/6, Back-to-Back +1, Combo +1…+5, Perfect Clear +10
-- Incoming garbage shows on the red meter. Your line clears cancel it first; anything left rises when you lock a piece without clearing.
-- Your opponent's board streams live (about 20 updates/sec) and renders in their chosen skin.
-- Quick match, or a private room with a 5-character code and a share link
-- Elo rating (starts at 1000) and a global battle leaderboard
-
-**Customization:** 10 block skins (Classic bevel, Flat, Neon, Glass, 8-Bit, Candy, Gems, Wireframe, Monochrome, Sunset) and 8 board themes (Tetris Battle, Midnight, Aurora, Synthwave, Matrix, Ember, Void, Paper), with a live preview. Choices are saved to your account.
 
 ## Develop
 
 ```bash
 npm install
 npm run dev        # applies migrations to a local D1, then serves http://localhost:5173
-npm test           # engine unit tests
+npm test           # engine, determinism and session replay tests
 npm run typecheck
 ```
 
-To test 1v1 locally, open a normal window and a private window (two separate sessions). Sign in or play as guest in each, then hit **Quick match** in both.
+To test 1v1 locally, open a normal window and a private window, sign in (or play as guest) in each, and press **Quick match** in both.
+
+CI (`.github/workflows/ci.yml`) runs the typecheck, tests and build on every push to `main` and on every pull request.
 
 ## Deploy to Cloudflare (free)
 
-1. Log in from this folder (opens your browser once):
-   ```bash
-   npx wrangler login
-   ```
-2. Deploy:
-   ```bash
-   npm run deploy
-   ```
-   This builds the app, applies any new D1 migrations to the remote database (the `database_id` in `wrangler.jsonc`), then deploys. It prints your URL, e.g. `https://0xhub.<your-subdomain>.workers.dev`.
-3. Optional: add a custom domain under Workers & Pages → 0xhub → Settings → Domains & Routes.
+```bash
+npx wrangler login     # once; opens your browser
+npm run deploy         # build → apply D1 migrations (remote) → deploy
+```
 
-For automatic deploys on every push, connect the GitHub repo under Workers & Pages → 0xhub → Settings → Builds. Use build command `npm run build` and deploy command `npx wrangler d1 migrations apply DB --remote && npx wrangler deploy`.
+It prints your URL, e.g. `https://0xhub.<your-subdomain>.workers.dev`. You can add a custom domain under Workers & Pages → 0xhub → Settings → Domains & Routes.
 
-To look at the data, open the Cloudflare dashboard → Storage & Databases → D1 → your database → Console, or run:
+For automatic deploys from GitHub, connect the repo under Workers & Pages → 0xhub → Settings → Builds. Use build command `npm run build` and deploy command `npx wrangler d1 migrations apply DB --remote && npx wrangler deploy`.
+
+To inspect data, open Cloudflare dashboard → Storage & Databases → D1 → Console, or run:
 
 ```bash
 npx wrangler d1 execute DB --remote --command "SELECT display_name, rating FROM users ORDER BY rating DESC LIMIT 10"
 ```
 
-## Known limits / next steps
+## Known limits
 
-- No password reset yet (accounts have no email). Adding email, or Google/GitHub sign-in, would allow recovery.
-- Login has no rate limiting yet. Cloudflare's Rate Limiting binding or a Turnstile check would harden it.
-- Guest users that never come back stay in the `users` table. A scheduled cleanup (Cron Trigger) can prune old, empty guests.
-- Each client simulates its own board, and the server referees time, garbage and KOs. Endless scores get plausibility checks, not full server-side replay validation.
-- Switching browser tabs mid-battle pauses your board (browsers throttle background animation), but the match clock keeps running.
+- **Not yet tested** on Safari, Firefox or real phones (touch controls), or across real internet latency between two locations. Do this before a public launch.
+- No password reset, because accounts have no email. Google sign-in, or email via Resend once you have a domain, would add recovery.
+- Bots that play using legitimate inputs can't be detected by replay verification.
+- Free-tier capacity: D1 and Durable Object storage each allow about 100k row writes per day. A battle writes roughly 50–100 rows, so this covers several hundred matches a day before needing the $5/month Workers Paid plan.

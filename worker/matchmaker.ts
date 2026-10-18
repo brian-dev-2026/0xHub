@@ -11,7 +11,7 @@ export class Matchmaker extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     let userId: string;
     try {
-      userId = JSON.parse(request.headers.get("X-0xHub-User") ?? "").id;
+      userId = JSON.parse(decodeURIComponent(request.headers.get("X-0xHub-User") ?? "")).id;
       if (!userId) throw new Error();
     } catch {
       return new Response("Unauthorized", { status: 401 });
