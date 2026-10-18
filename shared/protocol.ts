@@ -111,6 +111,7 @@ export interface EndlessEntry {
   playerId: string;
   name: string;
   avatar: string;
+  color: string;
   score: number;
   lines: number;
   level: number;
@@ -121,6 +122,7 @@ export interface BattleEntry {
   playerId: string;
   name: string;
   avatar: string;
+  color: string;
   wins: number;
   losses: number;
   draws: number;
@@ -198,5 +200,5 @@ export interface MeResponse {
 export const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 export const PASSWORD_MIN = 8;
 
-export const AVATARS = ["🎮", "👾", "🦊", "🐉", "🚀", "⚡", "🔥", "🌙", "🐼", "🦄", "💎", "🎯", "🤖", "🐙", "🍀", "👑"];
+export { AVATARS, NO_AVATAR } from "./avatars";
 export const ACCENTS = ["#8b5cf6", "#22d3ee", "#f472b6", "#a3e635", "#fb923c", "#f43f5e", "#facc15", "#60a5fa"];

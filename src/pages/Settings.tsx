@@ -165,7 +165,7 @@ function Audio() {
     <div>
       <Slider label="Sound effects volume" hint="Synthesized SFX for moves, clears, garbage and KOs." value={Math.round(s.volume * 100)} min={0} max={100} unit="%" onChange={(v) => settingsStore.set({ volume: v / 100 })} />
       <div className="flex flex-wrap gap-2">
-        <button className="btn btn-ghost text-xs" onClick={() => sfx.tetris()}>Test: Quad</button>
+        <button className="btn btn-ghost text-xs" onClick={() => sfx.tetris()}>Test: Tetris</button>
         <button className="btn btn-ghost text-xs" onClick={() => sfx.tspin()}>Test: T-Spin</button>
         <button className="btn btn-ghost text-xs" onClick={() => sfx.ko()}>Test: KO</button>
       </div>

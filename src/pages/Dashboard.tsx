@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { EndlessEntry } from "../../shared/protocol";
 import { Avatar } from "../components/Layout";
+import { GameLogo } from "../components/GameLogo";
+import { LiveDot } from "../components/marks";
 import { IconInfinity, IconPlay, IconSwords } from "../components/icons";
 import { Card, Empty, SectionTitle, StatTile } from "../components/ui";
 import { GAMES } from "../games/registry";
@@ -41,14 +43,14 @@ export default function Dashboard() {
         <div className="relative flex flex-col items-start gap-8 md:flex-row md:items-center md:justify-between">
           <div className="max-w-lg">
             <div className="flex items-center gap-3">
-              <Avatar emoji={profile.avatar} color={profile.color} size={44} />
+              <Avatar avatar={profile.avatar} color={profile.color} size={44} />
               <div className="text-sm text-zinc-400">{greeting()},</div>
             </div>
             <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-5xl">
               {profile.displayName}
               <span className="text-gradient">.</span>
             </h1>
-            <p className="mt-3 text-zinc-400">Ready to stack? Jump into an endless run or challenge someone to a 2-minute battle.</p>
+            <p className="mt-3 text-zinc-400">Ready to stack? Jump into an endless run or challenge someone to a 2-minute Tetris Battle.</p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link to="/games/tetris/battle" className="btn btn-primary">
                 <IconSwords width={18} height={18} /> Battle 1v1
@@ -98,7 +100,7 @@ export default function Dashboard() {
             {top?.map((e, i) => (
               <div key={e.playerId} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${e.playerId === profile.id ? "bg-violet-500/10" : ""}`}>
                 <span className={`w-6 font-mono text-sm font-bold ${["text-amber-300", "text-zinc-300", "text-orange-400"][i] ?? "text-zinc-500"}`}>{i + 1}</span>
-                <span className="text-lg">{e.avatar}</span>
+                <Avatar avatar={e.avatar} color={e.color} size={28} />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{e.name}</span>
                 <span className="font-mono text-sm font-bold tabular-nums">{fmtNum(e.score)}</span>
               </div>
@@ -116,7 +118,7 @@ export default function Dashboard() {
           <Card className="divide-y divide-white/5 p-0">
             {me.history.slice(0, 6).map((h) => (
               <div key={`${h.mode}-${h.ts}`} className="flex items-center gap-4 px-5 py-3 text-sm">
-                <span className="grid size-9 place-items-center rounded-xl bg-white/5">{h.mode === "battle" ? "⚔️" : "♾️"}</span>
+                <span className="grid size-9 place-items-center rounded-xl bg-white/5 text-zinc-300">{h.mode === "battle" ? <IconSwords width={18} height={18} /> : <IconInfinity width={18} height={18} />}</span>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">
                     {h.mode === "battle" ? (
@@ -150,9 +152,9 @@ export function GameCard({ game }: { game: (typeof GAMES)[number] }) {
       <div className={`absolute inset-0 bg-gradient-to-br ${game.gradient} opacity-40`} />
       <div className="relative">
         <div className="flex items-start justify-between">
-          <span className="text-3xl">{game.emoji}</span>
+          <GameLogo game={game.id} size={48} />
           {game.status === "live" ? (
-            <span className="chip border-emerald-400/30 bg-emerald-400/10 text-emerald-300">● Live</span>
+            <span className="chip border-emerald-400/30 bg-emerald-400/10 text-emerald-300"><LiveDot /> Live</span>
           ) : (
             <span className="chip text-zinc-400">Coming soon</span>
           )}

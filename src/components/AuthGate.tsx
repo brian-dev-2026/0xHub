@@ -135,7 +135,7 @@ function Welcome() {
             Play. Compete. <span className="text-gradient">Climb.</span>
           </h1>
           <p className="mt-4 text-lg text-zinc-400">
-            Real-time block-stacking duels, endless high-score runs and global leaderboards, all in your browser.
+            Real-time Tetris Battle duels, endless high-score runs and global leaderboards, all in your browser.
           </p>
           <div className="mt-8 hidden -rotate-2 sm:block">
             <BoardPreview skinId="neon" themeId="synthwave" cell={12} />

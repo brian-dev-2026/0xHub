@@ -238,7 +238,7 @@ export async function topEndless(db: D1Database, limit: number): Promise<Endless
   // SQLite returns the other columns from the row that holds MAX(score).
   const { results } = await db
     .prepare(
-      `SELECT r.user_id, u.display_name, u.avatar, MAX(r.score) AS score, r.lines, r.level, r.created_at
+      `SELECT r.user_id, u.display_name, u.avatar, u.color, MAX(r.score) AS score, r.lines, r.level, r.created_at
        FROM endless_runs r JOIN users u ON u.id = r.user_id
        GROUP BY r.user_id ORDER BY score DESC LIMIT ?`,
     )
@@ -248,6 +248,7 @@ export async function topEndless(db: D1Database, limit: number): Promise<Endless
     playerId: r.user_id as string,
     name: r.display_name as string,
     avatar: r.avatar as string,
+    color: r.color as string,
     score: r.score as number,
     lines: r.lines as number,
     level: r.level as number,
@@ -258,7 +259,7 @@ export async function topEndless(db: D1Database, limit: number): Promise<Endless
 export async function topBattle(db: D1Database, limit: number): Promise<BattleEntry[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, display_name, avatar, wins, losses, draws, kos, rating FROM users
+      `SELECT id, display_name, avatar, color, wins, losses, draws, kos, rating FROM users
        WHERE (wins + losses + draws) > 0 ORDER BY rating DESC, wins DESC LIMIT ?`,
     )
     .bind(limit)
@@ -267,6 +268,7 @@ export async function topBattle(db: D1Database, limit: number): Promise<BattleEn
     playerId: r.id as string,
     name: r.display_name as string,
     avatar: r.avatar as string,
+    color: r.color as string,
     wins: r.wins as number,
     losses: r.losses as number,
     draws: r.draws as number,
@@ -323,7 +325,7 @@ export async function deleteAccount(db: D1Database, id: string): Promise<void> {
     db
       .prepare(
         `UPDATE users SET username = NULL, password_hash = NULL, is_guest = 1, display_name = 'Deleted player',
-         avatar = '👤', color = '#6b7280', rating = 1000, wins = 0, losses = 0, draws = 0, kos = 0 WHERE id = ?`,
+         avatar = 'none', color = '#6b7280', rating = 1000, wins = 0, losses = 0, draws = 0, kos = 0 WHERE id = ?`,
       )
       .bind(id),
   ]);

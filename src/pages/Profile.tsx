@@ -42,7 +42,7 @@ export default function Profile() {
         <div className="space-y-6 lg:col-span-1">
           <Card>
             <div className="flex flex-col items-center gap-3 py-4 text-center">
-              <Avatar emoji={user.avatar} color={user.color} size={88} />
+              <Avatar avatar={user.avatar} color={user.color} size={88} />
               <div>
                 <div className="text-xl font-bold">{user.displayName}</div>
                 <div className="text-sm text-zinc-500">{user.isGuest ? "Guest player" : `@${user.username}`}</div>
@@ -72,9 +72,11 @@ export default function Profile() {
                     <button
                       key={a}
                       onClick={() => save({ avatar: a })}
-                      className={`grid aspect-square place-items-center rounded-lg text-lg transition ${user.avatar === a ? "bg-violet-500/25 ring-2 ring-violet-400" : "bg-white/5 hover:bg-white/10"}`}
+                      aria-label={`Avatar ${a.slice(2)}`}
+                      aria-pressed={user.avatar === a}
+                      className={`grid aspect-square place-items-center rounded-lg p-0.5 transition ${user.avatar === a ? "bg-violet-500/25 ring-2 ring-violet-400" : "bg-white/5 hover:bg-white/10"}`}
                     >
-                      {a}
+                      <Avatar avatar={a} color={user.color} size={30} />
                     </button>
                   ))}
                 </div>

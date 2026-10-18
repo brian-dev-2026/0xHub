@@ -11,7 +11,7 @@ export default function TetrisHome() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title={<>Block <span className="text-gradient">Battle</span></>}
+        title={<>Tetris <span className="text-gradient">Battle</span></>}
         subtitle="Competitive block stacking: SRS rotation, hold, T-spins, combos and garbage. Every game is verified by the server."
       />
 

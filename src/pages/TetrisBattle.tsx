@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { RECONNECT_GRACE_MS, isValidRoomCode, randomRoomCode } from "../../shared/protocol";
 import { Avatar } from "../components/Layout";
-import { IconArrowLeft, IconBolt, IconCopy, IconSwords } from "../components/icons";
+import { IconAlert, IconArrowLeft, IconBolt, IconCopy, IconSwords } from "../components/icons";
+import { Star } from "../components/marks";
 import { GAME_NAME } from "../games/registry";
 import { BoardPanel, useCellSize } from "../games/tetris/BoardPanel";
 import { BattleClient, type EndInfo } from "../games/tetris/battleClient";
@@ -113,7 +114,7 @@ function Lobby() {
           </>
         ) : (
           <div className="flex flex-col items-center gap-6 py-16 text-center">
-            <div className="pulse-ring grid size-24 place-items-center rounded-full bg-violet-500/20 text-4xl">⚔️</div>
+            <div className="pulse-ring grid size-24 place-items-center rounded-full bg-violet-500/20 text-violet-200"><IconSwords width={40} height={40} /></div>
             <div>
               <div className="text-2xl font-bold">Finding an opponent…</div>
               <div className="mt-1 text-sm text-zinc-400">Tip: open a private window, sign in as someone else, and quick match to test.</div>
@@ -292,7 +293,7 @@ function MatchView({ client, code, onLeave }: { client: BattleClient; code: stri
           </div>
           <div className="text-[10px] tracking-[0.2em] text-zinc-500 uppercase">{ui.latency ? `${ui.latency}ms` : ""}</div>
         </div>
-        <PlayerTag p={ui.opponent ?? { name: "—", avatar: "❔", color: "#555555" }} kos={ui.kos.opponent} right />
+        <PlayerTag p={ui.opponent ?? { name: "—", avatar: "none", color: "#555555" }} kos={ui.kos.opponent} right />
       </div>
 
       <div className="flex flex-wrap items-start justify-center gap-4 lg:gap-8">
@@ -346,7 +347,7 @@ function MatchView({ client, code, onLeave }: { client: BattleClient; code: stri
 function ErrorBox({ message, onBack }: { message: string; onBack: () => void }) {
   return (
     <div className="flex flex-col items-center gap-4 py-16 text-center" role="alert">
-      <div className="text-4xl">⚠️</div>
+      <div className="grid size-14 place-items-center rounded-2xl bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"><IconAlert width={28} height={28} /></div>
       <div className="text-xl font-bold">{message}</div>
       <button className="btn btn-primary" onClick={onBack}>Back to lobby</button>
     </div>
@@ -381,12 +382,12 @@ function Shell({ children, onBack, compact }: { children: React.ReactNode; onBac
 function PlayerTag({ p, kos, right }: { p: { name: string; avatar: string; color: string }; kos: number; right?: boolean }) {
   return (
     <div className={`flex min-w-0 items-center gap-2.5 ${right ? "flex-row-reverse text-right" : ""}`}>
-      <Avatar emoji={p.avatar} color={p.color} size={38} />
+      <Avatar avatar={p.avatar} color={p.color} size={38} />
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold">{p.name}</div>
         <div className="flex items-center gap-1 text-xs text-amber-300" style={{ justifyContent: right ? "flex-end" : "flex-start" }}>
           {Array.from({ length: Math.min(kos, 8) }).map((_, i) => (
-            <span key={i} aria-hidden>★</span>
+            <Star key={i} />
           ))}
           <span className="font-mono font-bold">{kos} KO</span>
         </div>
@@ -455,7 +456,7 @@ function Rules() {
   const rows = [
     ["Double", "1"],
     ["Triple", "2"],
-    ["Quad (4 lines)", "4"],
+    ["Tetris (4 lines)", "4"],
     ["T-Spin Single / Double / Triple", "2 / 4 / 6"],
     ["Back-to-Back bonus", "+1"],
     ["Combo", "+1 … +5"],

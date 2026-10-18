@@ -1,5 +1,6 @@
 import { NavLink, Outlet, Link } from "react-router";
 import { useMe } from "../lib/auth";
+import { Avatar } from "./marks";
 import { IconGrid, IconHome, IconSettings, IconTrophy, IconUser } from "./icons";
 
 const NAV = [
@@ -26,22 +27,7 @@ export function Logo({ className = "" }: { className?: string }) {
   );
 }
 
-export function Avatar({ emoji, color, size = 36 }: { emoji: string; color: string; size?: number }) {
-  return (
-    <span
-      className="grid shrink-0 place-items-center rounded-xl"
-      style={{
-        width: size,
-        height: size,
-        fontSize: size * 0.5,
-        background: `linear-gradient(135deg, ${color}55, ${color}22)`,
-        boxShadow: `inset 0 0 0 1px ${color}66`,
-      }}
-    >
-      {emoji}
-    </span>
-  );
-}
+export { Avatar };
 
 export function Layout() {
   const profile = useMe().user;
@@ -70,7 +56,7 @@ export function Layout() {
         </nav>
         <div className="mt-auto">
           <Link to="/profile" className="glass flex items-center gap-3 rounded-2xl p-3 transition hover:border-violet-500/40">
-            <Avatar emoji={profile.avatar} color={profile.color} />
+            <Avatar avatar={profile.avatar} color={profile.color} />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{profile.displayName}</div>
               <div className="truncate text-xs text-zinc-500">{profile.isGuest ? "Guest player" : `@${profile.username}`}</div>
@@ -83,7 +69,7 @@ export function Layout() {
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/5 bg-ink-950/70 px-4 py-3 backdrop-blur-xl lg:hidden">
         <Logo />
         <Link to="/profile" aria-label="Profile">
-          <Avatar emoji={profile.avatar} color={profile.color} size={34} />
+          <Avatar avatar={profile.avatar} color={profile.color} size={34} />
         </Link>
       </header>
 

@@ -1,5 +1,5 @@
-/** Display name of the block-stacking game. ("Tetris" is a trademark of The Tetris Company — don't use it.) */
-export const GAME_NAME = "Block Battle";
+/** Display name of the Tetris game. */
+export const GAME_NAME = "Tetris Battle";
 
 export interface GameMeta {
   id: string;
@@ -9,7 +9,6 @@ export interface GameMeta {
   status: "live" | "soon";
   modes: string[];
   gradient: string;
-  emoji: string;
 }
 
 export const GAMES: GameMeta[] = [
@@ -21,7 +20,6 @@ export const GAMES: GameMeta[] = [
     status: "live",
     modes: ["Endless", "1v1 Battle"],
     gradient: "from-violet-600/60 via-indigo-600/40 to-cyan-500/40",
-    emoji: "🧱",
   },
   {
     id: "snake",
@@ -30,7 +28,6 @@ export const GAMES: GameMeta[] = [
     status: "soon",
     modes: ["FFA"],
     gradient: "from-lime-500/40 via-emerald-600/30 to-teal-600/30",
-    emoji: "🐍",
   },
   {
     id: "2048",
@@ -39,7 +36,6 @@ export const GAMES: GameMeta[] = [
     status: "soon",
     modes: ["Solo", "1v1"],
     gradient: "from-amber-500/40 via-orange-600/30 to-rose-600/30",
-    emoji: "🔢",
   },
   {
     id: "mines",
@@ -48,7 +44,6 @@ export const GAMES: GameMeta[] = [
     status: "soon",
     modes: ["Time Attack"],
     gradient: "from-slate-500/40 via-zinc-600/30 to-neutral-700/30",
-    emoji: "💣",
   },
   {
     id: "connect4",
@@ -57,6 +52,5 @@ export const GAMES: GameMeta[] = [
     status: "soon",
     modes: ["1v1"],
     gradient: "from-rose-500/40 via-pink-600/30 to-fuchsia-600/30",
-    emoji: "🔴",
   },
 ];

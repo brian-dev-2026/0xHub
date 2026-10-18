@@ -4,6 +4,7 @@ import { Card, Empty, PageHeader, Segmented } from "../components/ui";
 import { fetchLeaderboard } from "../lib/api";
 import { fmtNum, timeAgo } from "../lib/format";
 import { useMe } from "../lib/auth";
+import { Avatar, RankBadge } from "../components/marks";
 
 type Mode = "endless" | "battle";
 
@@ -21,7 +22,7 @@ export default function Leaderboard() {
   }, [mode]);
 
   const rows = mode === "endless" ? endless : battle;
-  const medal = (i: number) => ["🥇", "🥈", "🥉"][i] ?? <span className="font-mono text-zinc-500">{i + 1}</span>;
+  const medal = (i: number) => <RankBadge rank={i + 1} />;
 
   return (
     <>
@@ -70,7 +71,7 @@ export default function Leaderboard() {
                 ? endless!.map((e, i) => (
                     <tr key={e.playerId} className={`border-b border-white/5 last:border-0 ${e.playerId === profile.id ? "bg-violet-500/10" : ""}`}>
                       <td className="px-5 py-3 text-lg">{medal(i)}</td>
-                      <td className="px-2 py-3"><span className="mr-2">{e.avatar}</span><span className="font-medium">{e.name}</span></td>
+                      <td className="px-2 py-3"><span className="flex items-center gap-2.5"><Avatar avatar={e.avatar} color={e.color} size={28} /><span className="font-medium">{e.name}</span></span></td>
                       <td className="px-2 py-3 text-right font-mono font-bold">{fmtNum(e.score)}</td>
                       <td className="px-2 py-3 text-right font-mono text-zinc-300">{e.lines}</td>
                       <td className="px-2 py-3 text-right font-mono text-zinc-300">{e.level}</td>
@@ -80,7 +81,7 @@ export default function Leaderboard() {
                 : battle!.map((e, i) => (
                     <tr key={e.playerId} className={`border-b border-white/5 last:border-0 ${e.playerId === profile.id ? "bg-violet-500/10" : ""}`}>
                       <td className="px-5 py-3 text-lg">{medal(i)}</td>
-                      <td className="px-2 py-3"><span className="mr-2">{e.avatar}</span><span className="font-medium">{e.name}</span></td>
+                      <td className="px-2 py-3"><span className="flex items-center gap-2.5"><Avatar avatar={e.avatar} color={e.color} size={28} /><span className="font-medium">{e.name}</span></span></td>
                       <td className="px-2 py-3 text-right font-mono font-bold">{e.rating}</td>
                       <td className="px-2 py-3 text-right font-mono text-zinc-300">{e.wins}-{e.losses}-{e.draws}</td>
                       <td className="px-5 py-3 text-right font-mono text-zinc-300">{e.kos}</td>

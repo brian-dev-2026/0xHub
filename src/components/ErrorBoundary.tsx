@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { GameLogo } from "./GameLogo";
 
 interface State {
   error: Error | null;
@@ -22,7 +23,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       <div className="grid min-h-screen place-items-center p-6 text-center">
         <div className="app-bg" />
         <div className="glass max-w-md rounded-3xl p-8">
-          <div className="text-4xl">🧱💥</div>
+          <div className="flex justify-center"><GameLogo game="tetris" size={56} /></div>
           <h1 className="mt-4 text-xl font-bold">Something went wrong</h1>
           <p className="mt-2 text-sm text-zinc-400">
             The page hit an unexpected error. Your account and saved progress are safe on the server.

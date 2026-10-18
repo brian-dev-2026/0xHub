@@ -716,7 +716,7 @@ export class TetrisEngine {
 }
 
 export function clearLabel(lines: number, tspin: TSpin, b2b: boolean, pc: boolean): string {
-  const names = ["", "SINGLE", "DOUBLE", "TRIPLE", "QUAD"];
+  const names = ["", "SINGLE", "DOUBLE", "TRIPLE", "TETRIS"];
   let label = tspin === "full" ? `T-SPIN ${names[lines]}` : tspin === "mini" ? `T-SPIN MINI ${names[lines]}` : names[lines];
   if (b2b) label = `B2B ${label}`;
   if (pc) label = `PERFECT CLEAR`;

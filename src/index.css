@@ -145,6 +145,48 @@ body {
     color: transparent;
   }
 
+  /* CSS marks (replacing emoji/symbol glyphs) */
+  .mark-star {
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    background: currentColor;
+    clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    vertical-align: -0.05em;
+  }
+  .mark-check {
+    display: inline-block;
+    width: 0.4em;
+    height: 0.75em;
+    border: solid currentColor;
+    border-width: 0 0.14em 0.14em 0;
+    transform: rotate(45deg) translate(-0.08em, -0.12em);
+    margin: 0 0.25em 0 0.1em;
+  }
+  .mark-live {
+    display: inline-block;
+    width: 0.5em;
+    height: 0.5em;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 0 0.18em color-mix(in srgb, currentColor 30%, transparent);
+  }
+  .mark-medal {
+    display: inline-grid;
+    place-items: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #1c1917;
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.25), 0 0 0 2px rgba(255, 255, 255, 0.08);
+  }
+  .mark-medal-gold { background: radial-gradient(circle at 35% 30%, #fff7cc, #facc15 45%, #b45309); }
+  .mark-medal-silver { background: radial-gradient(circle at 35% 30%, #ffffff, #d4d4d8 45%, #71717a); }
+  .mark-medal-bronze { background: radial-gradient(circle at 35% 30%, #ffe4cc, #fb923c 45%, #9a3412); }
+
   /* Tetris board chrome */
   .board-frame {
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.25));

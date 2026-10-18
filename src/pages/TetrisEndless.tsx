@@ -10,6 +10,7 @@ import { sfx } from "../lib/sfx";
 import { settingsStore } from "../lib/store";
 import { STEP_MS } from "../../shared/tetris/engine";
 import { GAME_NAME } from "../games/registry";
+import { Check, Star } from "../components/marks";
 
 type Phase = "ready" | "starting" | "playing" | "over";
 
@@ -223,7 +224,7 @@ export default function TetrisEndless() {
     overlay = (
       <div className="flex flex-col items-center gap-3 p-4 text-center animate-in">
         <div className="text-xs font-bold tracking-[0.3em] text-rose-300">GAME OVER</div>
-        {result.newBest && result.verify !== "failed" && <div className="chip border-amber-400/40 bg-amber-400/15 text-amber-200">★ New personal best</div>}
+        {result.newBest && result.verify !== "failed" && <div className="chip border-amber-400/40 bg-amber-400/15 text-amber-200"><Star /> New personal best</div>}
         <div className="font-mono text-4xl font-bold">{fmtNum(result.score)}</div>
         <div className="grid grid-cols-3 gap-3 text-xs text-zinc-300">
           <div><div className="font-mono text-base font-bold text-white">{result.lines}</div>lines</div>
@@ -232,7 +233,7 @@ export default function TetrisEndless() {
         </div>
         <div className="text-xs text-zinc-400" aria-live="polite">
           {result.verify === "pending" && "Verifying your run…"}
-          {result.verify === "ok" && <>✓ Verified · global rank (your best) <b className="text-white">#{result.rank}</b></>}
+          {result.verify === "ok" && <><Check className="text-emerald-300" />Verified · global rank (your best) <b className="text-white">#{result.rank}</b></>}
           {result.verify === "failed" && <span className="text-rose-300">This run couldn't be verified{result.error ? `: ${result.error}` : ""}. It wasn't saved.</span>}
         </div>
         <div className="flex gap-2">

@@ -1,8 +1,8 @@
 # 0xHub
 
-A modern gaming hub. First title: **Block Battle**, a competitive block-stacking game with an Endless mode and a real-time 1v1 Battle mode in the style of the classic Facebook 2P battle game.
+A modern gaming hub. First title: **Tetris Battle**, with an Endless mode and a real-time 1v1 Battle mode modeled on the classic Facebook Tetris Battle 2P. The display name is one constant: `GAME_NAME` in `src/games/registry.ts`.
 
-> The name "Tetris" is a trademark of The Tetris Company, so the game is called Block Battle. The display name is one constant: `GAME_NAME` in `src/games/registry.ts`.
+The UI uses no emoji or image assets: avatars (tetromino/pentomino shapes in the player's color), game logos, medals and marks are all drawn with CSS, and icons are inline SVG.
 
 ## Stack
 
@@ -69,7 +69,7 @@ Nothing is stored in the browser except the session cookie.
 - 500 ms lock delay with move reset (15 resets max)
 - T-spins (3-corner rule, including minis), back-to-back, combos, perfect clears
 - Battle: 2-minute rounds. Topping out gives your opponent a KO and your field resets. Most KOs wins; ties go to whoever sent more lines.
-- Garbage sent: Double 1, Triple 2, Quad 4, T-Spin Single/Double/Triple 2/4/6, Back-to-Back +1, Combo +1…+5, Perfect Clear +10. Your clears cancel incoming garbage first.
+- Garbage sent: Double 1, Triple 2, Tetris 4, T-Spin Single/Double/Triple 2/4/6, Back-to-Back +1, Combo +1…+5, Perfect Clear +10. Your clears cancel incoming garbage first.
 - Customization: 10 block skins and 8 board themes, saved to your account.
 
 ## Project layout
