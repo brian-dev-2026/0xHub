@@ -147,6 +147,7 @@ function Match({ code, onLeave }: { code: string; onLeave: () => void }) {
   const [client, setClient] = useState<BattleClient | null>(null);
   useEffect(() => {
     const c = new BattleClient(code);
+    if (import.meta.env.DEV) (window as unknown as { __battle: BattleClient }).__battle = c;
     setClient(c);
     return () => c.dispose();
   }, [code]);

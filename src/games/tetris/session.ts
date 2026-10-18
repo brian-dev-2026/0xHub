@@ -96,9 +96,12 @@ export class GameSession {
       onMove: () => sfx.move(),
       onRotate: (t) => (t !== "none" ? sfx.tspinRotate() : sfx.rotate()),
       onHold: () => sfx.hold(),
+      // Callbacks that read or flush the input log are deferred to a microtask:
+      // they fire while an input is still being applied, before act() has
+      // recorded it, and flushing then would drop that input from the batch.
       onLock: () => {
         sfx.lock();
-        this.opts.onLock?.();
+        queueMicrotask(() => this.opts.onLock?.());
       },
       onClear: (e) => {
         this.flash = { rows: e.rows.filter((r) => r >= 0 && r < VISIBLE_ROWS), at: performance.now() };
@@ -112,13 +115,15 @@ export class GameSession {
       onTopOut: () => {
         if (this.opts.mode === "endless") {
           this.running = false;
-          this.opts.onGameOver?.();
+          queueMicrotask(() => this.opts.onGameOver?.());
         }
       },
       onKO: () => {
         sfx.ko();
-        this.input.releaseAll();
-        this.opts.onKO?.();
+        queueMicrotask(() => {
+          this.input.releaseAll();
+          this.opts.onKO?.();
+        });
       },
       onLevelUp: (l) => {
         sfx.levelUp();

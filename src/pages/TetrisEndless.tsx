@@ -106,6 +106,7 @@ export default function TetrisEndless() {
   );
 
   useEffect(() => {
+    if (import.meta.env.DEV) (window as unknown as { __session: GameSession }).__session = session;
     session.start();
     const iv = setInterval(() => setTick((t) => t + 1), 100);
     const up = setInterval(() => {
