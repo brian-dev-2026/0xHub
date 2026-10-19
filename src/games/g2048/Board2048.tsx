@@ -1,19 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Dir } from "../../../shared/games/g2048";
-
-const TILE: Record<number, [string, string]> = {
-  2: ["#eee4da", "#776e65"],
-  4: ["#ede0c8", "#776e65"],
-  8: ["#f2b179", "#fff"],
-  16: ["#f59563", "#fff"],
-  32: ["#f67c5f", "#fff"],
-  64: ["#f65e3b", "#fff"],
-  128: ["#edcf72", "#fff"],
-  256: ["#edcc61", "#fff"],
-  512: ["#edc850", "#fff"],
-  1024: ["#a78bfa", "#fff"],
-  2048: ["#8b5cf6", "#fff"],
-};
+import { settingsStore } from "../../lib/store";
+import { getTileSet, tileColors, type TileSet } from "../looks";
 
 export function Board2048({
   board,
@@ -22,6 +10,7 @@ export function Board2048({
   spawn = -1,
   dim = false,
   overlay,
+  tileSet,
 }: {
   board: number[];
   size?: number;
@@ -29,30 +18,46 @@ export function Board2048({
   spawn?: number;
   dim?: boolean;
   overlay?: React.ReactNode;
+  /** Defaults to the player's chosen tile set. */
+  tileSet?: TileSet;
 }) {
+  const chosen = settingsStore.use().tiles2048;
+  const set = tileSet ?? getTileSet(chosen);
   const gap = Math.round(size * 0.03);
   const cell = (size - gap * 5) / 4;
   return (
-    <div className="relative rounded-2xl p-0" style={{ width: size, height: size, background: "#3a3229", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)" }}>
+    <div
+      className="relative p-0"
+      style={{ width: size, height: size, background: set.board, borderRadius: set.pixel ? 0 : 16, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)" }}
+    >
       {board.map((v, i) => {
         const x = i % 4;
         const y = Math.floor(i / 4);
-        const [bg, fg] = TILE[v] ?? ["#3c3a32", "#fff"];
+        const [bg, fg] = v > 0 ? tileColors(set, v) : ["", ""];
         const digits = String(v).length;
         return (
           <div
             key={i}
-            className="absolute rounded-lg"
-            style={{ left: gap + x * (cell + gap), top: gap + y * (cell + gap), width: cell, height: cell, background: "rgba(238,228,218,0.08)" }}
+            className="absolute"
+            style={{ left: gap + x * (cell + gap), top: gap + y * (cell + gap), width: cell, height: cell, background: set.empty, borderRadius: set.radius }}
           >
             {v > 0 && (
               <div
-                className={`grid h-full w-full place-items-center rounded-lg font-bold ${merged.includes(i) ? "t2048-pop" : ""} ${spawn === i ? "t2048-spawn" : ""}`}
+                className={`grid h-full w-full place-items-center font-bold ${set.pixel ? "font-mono" : ""} ${merged.includes(i) ? "t2048-pop" : ""} ${spawn === i ? "t2048-spawn" : ""}`}
                 style={{
-                  background: bg,
+                  background: set.neon ? "rgba(0,0,0,0.35)" : bg,
                   color: fg,
+                  borderRadius: set.radius,
+                  border: set.neon ? `2px solid ${bg}` : undefined,
+                  textShadow: set.neon ? `0 0 8px ${bg}` : undefined,
                   fontSize: cell * (digits <= 2 ? 0.45 : digits === 3 ? 0.36 : 0.28),
-                  boxShadow: v >= 128 ? `0 0 ${Math.min(30, Math.log2(v) * 2)}px ${bg}` : "inset 0 -3px 0 rgba(0,0,0,0.12)",
+                  boxShadow: set.neon
+                    ? `0 0 ${6 + Math.log2(v) * 1.5}px ${bg}, inset 0 0 10px ${bg}55`
+                    : set.pixel
+                      ? "inset -4px -4px 0 rgba(0,0,0,0.25), inset 4px 4px 0 rgba(255,255,255,0.25)"
+                      : v >= 128
+                        ? `0 0 ${Math.min(30, Math.log2(v) * 2)}px ${bg}`
+                        : "inset 0 -3px 0 rgba(0,0,0,0.12)",
                 }}
               >
                 {v}
@@ -62,7 +67,7 @@ export function Board2048({
         );
       })}
       {(dim || overlay) && (
-        <div className={`absolute inset-0 grid place-items-center rounded-2xl ${dim ? "bg-black/55 backdrop-blur-[1px]" : ""}`}>{overlay}</div>
+        <div className={`absolute inset-0 grid place-items-center ${set.pixel ? "" : "rounded-2xl"} ${dim ? "bg-black/55 backdrop-blur-[1px]" : ""}`}>{overlay}</div>
       )}
     </div>
   );

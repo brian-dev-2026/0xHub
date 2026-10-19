@@ -5,10 +5,13 @@ import { ErrorPanel, GameShell } from "../../components/GameShell";
 import { GameLogo } from "../../components/GameLogo";
 import { Check } from "../../components/marks";
 import { Card, SectionTitle } from "../../components/ui";
+import { settingsStore } from "../../lib/store";
+import { getMinesTheme } from "../../games/looks";
+import { minesCellClass, minesVars } from "../../games/lookStyles";
 import { ApiError, refreshMe, useMe } from "../../lib/auth";
 import { sfx } from "../../lib/sfx";
+import { MinesLook, CustomizeSection } from "../../games/LookPickers";
 
-const NUM_COLORS = ["", "#60a5fa", "#4ade80", "#f87171", "#a78bfa", "#fb923c", "#22d3ee", "#e4e4e7", "#a1a1aa"];
 export const fmtTime = (ms: number | null) => (ms === null ? "—" : `${(ms / 1000).toFixed(2)}s`);
 
 async function post<T>(path: string, json: unknown): Promise<T> {
@@ -62,12 +65,16 @@ function Home() {
             <li>The mine layout stays on the server, and the server times your run from first click to clear.</li>
           </ul>
         </Card>
+        <CustomizeSection>
+          <MinesLook />
+        </CustomizeSection>
       </div>
     </GameShell>
   );
 }
 
 function Play({ difficulty }: { difficulty: Difficulty }) {
+  const theme = getMinesTheme(settingsStore.use().minesTheme);
   const info = DIFFICULTIES[difficulty];
   const { w, h, mines } = info;
   const [runId, setRunId] = useState<string | null>(null);
@@ -191,8 +198,8 @@ function Play({ difficulty }: { difficulty: Difficulty }) {
 
         <div className="max-w-full overflow-auto rounded-xl p-1">
           <div
-            className="relative grid select-none gap-px rounded-lg bg-zinc-800 p-px"
-            style={{ gridTemplateColumns: `repeat(${w}, ${cell}px)` }}
+            className="relative grid select-none gap-px rounded-lg p-px"
+            style={{ gridTemplateColumns: `repeat(${w}, ${cell}px)`, ...minesVars(theme) }}
             onContextMenu={(e) => e.preventDefault()}
           >
             {Array.from({ length: w * h }, (_, i) => {
@@ -204,8 +211,8 @@ function Play({ difficulty }: { difficulty: Difficulty }) {
                 <button
                   key={i}
                   aria-label={`Cell ${(i % w) + 1}, ${Math.floor(i / w) + 1}${isOpen ? (n ? `, ${n}` : ", empty") : flagged ? ", flagged" : ""}`}
-                  className={`relative grid place-items-center font-mono font-bold ${isOpen ? "bg-zinc-900" : "bg-zinc-600 hover:bg-zinc-500 shadow-[inset_0_2px_0_rgba(255,255,255,0.18),inset_0_-2px_0_rgba(0,0,0,0.3)]"} ${lost?.hit === i ? "!bg-rose-600" : ""}`}
-                  style={{ width: cell, height: cell, fontSize: cell * 0.55, color: NUM_COLORS[n ?? 0] }}
+                  className={minesCellClass(theme, isOpen, lost?.hit === i)}
+                  style={{ width: cell, height: cell, fontSize: cell * 0.55, color: n ? theme.numbers[n - 1] : undefined, borderRadius: theme.radius }}
                   onClick={() => onCell(i)}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -254,3 +261,4 @@ function Play({ difficulty }: { difficulty: Difficulty }) {
     </GameShell>
   );
 }
+

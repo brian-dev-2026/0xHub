@@ -10,6 +10,10 @@ import { Card, SectionTitle, StatTile } from "../../components/ui";
 import { refreshMe, useMe } from "../../lib/auth";
 import { useRoomSocket } from "../../lib/roomSocket";
 import { sfx } from "../../lib/sfx";
+import { settingsStore } from "../../lib/store";
+import { getSnakeArena, getSnakeSkin } from "../../games/looks";
+import { drawArena } from "../../games/snake/render";
+import { SnakeLook, CustomizeSection } from "../../games/LookPickers";
 
 export default function SnakePage() {
   const { code } = useParams();
@@ -56,6 +60,9 @@ function Home() {
             <li>Highest score after two minutes wins.</li>
           </ul>
         </Card>
+        <CustomizeSection>
+          <SnakeLook />
+        </CustomizeSection>
       </div>
     </GameShell>
   );
@@ -292,15 +299,11 @@ function TouchPad({ onDir }: { onDir: (d: number) => void }) {
   );
 }
 
-/** Darken a #rrggbb color by a fraction (canvas-safe; no color-mix). */
-function darken(hex: string, f: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const c = (v: number) => Math.round(v * (1 - f));
-  return `rgb(${c((n >> 16) & 255)},${c((n >> 8) & 255)},${c(n & 255)})`;
-}
-
 function Arena({ snaps, meId }: { snaps: React.RefObject<{ prev: SnakeSnapshot | null; cur: SnakeSnapshot | null; at: number; msLeft: number }>; meId: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const { snakeSkin, snakeArena } = settingsStore.use();
+  const skin = getSnakeSkin(snakeSkin);
+  const arena = getSnakeArena(snakeArena);
   const cell = Math.max(9, Math.min(20, Math.floor(Math.min(window.innerWidth - 32, 900) / SNAKE_W), Math.floor((window.innerHeight - 200) / SNAKE_H)));
   const W = SNAKE_W * cell;
   const H = SNAKE_H * cell;
@@ -315,66 +318,15 @@ function Arena({ snaps, meId }: { snaps: React.RefObject<{ prev: SnakeSnapshot |
     canvas.style.height = `${H}px`;
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const xy = (c: number): [number, number] => [c % SNAKE_W, Math.floor(c / SNAKE_W)];
     const draw = () => {
       const { prev, cur, at } = snaps.current!;
-      ctx.fillStyle = "#0b1410";
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "rgba(74,222,128,0.05)";
-      for (let x = 0; x < SNAKE_W; x++) for (let y = 0; y < SNAKE_H; y++) if ((x + y) % 2) ctx.fillRect(x * cell, y * cell, cell, cell);
-      if (cur) {
-        const t = Math.min(1, (performance.now() - at) / SNAKE_TICK_MS);
-        // food
-        for (const f of cur.food) {
-          const [fx, fy] = xy(f);
-          const g = ctx.createRadialGradient(fx * cell + cell / 2, fy * cell + cell / 2, 1, fx * cell + cell / 2, fy * cell + cell / 2, cell * 0.6);
-          g.addColorStop(0, "#fda4af");
-          g.addColorStop(1, "rgba(244,63,94,0)");
-          ctx.fillStyle = g;
-          ctx.fillRect(fx * cell - cell / 2, fy * cell - cell / 2, cell * 2, cell * 2);
-          ctx.fillStyle = "#f43f5e";
-          ctx.beginPath();
-          ctx.arc(fx * cell + cell / 2, fy * cell + cell / 2, cell * 0.3, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        // snakes (interpolated between the last two server ticks)
-        for (const p of cur.players) {
-          if (!p.alive || !p.body.length) continue;
-          const old = prev?.players.find((q) => q.id === p.id);
-          const pts = p.body.map((c, i) => {
-            const [x, y] = xy(c);
-            const oc = old?.alive ? old.body[i] ?? old.body[old.body.length - 1] : undefined;
-            if (oc === undefined) return [x, y];
-            const [ox, oy] = xy(oc);
-            if (Math.abs(ox - x) + Math.abs(oy - y) > 1) return [x, y];
-            return [ox + (x - ox) * t, oy + (y - oy) * t];
-          });
-          for (let i = pts.length - 1; i >= 0; i--) {
-            const [x, y] = pts[i];
-            const pad = i === 0 ? 0.04 : 0.1 + (i / pts.length) * 0.12;
-            ctx.fillStyle = i === 0 ? p.color : darken(p.color, Math.min(0.45, i * 0.02));
-            ctx.beginPath();
-            ctx.roundRect(x * cell + cell * pad, y * cell + cell * pad, cell * (1 - pad * 2), cell * (1 - pad * 2), cell * 0.3);
-            ctx.fill();
-          }
-          const [hx, hy] = pts[0];
-          ctx.fillStyle = "#0b1410";
-          ctx.beginPath();
-          ctx.arc(hx * cell + cell * 0.33, hy * cell + cell * 0.38, cell * 0.1, 0, Math.PI * 2);
-          ctx.arc(hx * cell + cell * 0.67, hy * cell + cell * 0.38, cell * 0.1, 0, Math.PI * 2);
-          ctx.fill();
-          if (p.id === meId) {
-            ctx.strokeStyle = "rgba(255,255,255,0.8)";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(hx * cell, hy * cell, cell, cell);
-          }
-        }
-      }
+      const t = Math.min(1, (performance.now() - at) / SNAKE_TICK_MS);
+      drawArena(ctx, { prev, cur, t, cell, meId, skin, arena });
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [snaps, meId, W, H, cell]);
+  }, [snaps, meId, W, H, cell, skin, arena]);
 
-  return <canvas ref={ref} className="block rounded-2xl ring-1 ring-emerald-500/20" aria-label="Snake arena" />;
+  return <canvas ref={ref} className="block rounded-2xl ring-1" style={{ ["--tw-ring-color" as string]: arena.frame }} aria-label="Snake arena" />;
 }

@@ -13,6 +13,7 @@ import { ApiError, refreshMe, useMe } from "../../lib/auth";
 import { fmtNum } from "../../lib/format";
 import { useRoomSocket, type RoomSocket } from "../../lib/roomSocket";
 import { sfx } from "../../lib/sfx";
+import { Look2048, CustomizeSection } from "../../games/LookPickers";
 
 async function post<T>(path: string, json: unknown): Promise<T> {
   const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
@@ -62,6 +63,9 @@ function Home() {
           <StatTile label="Duel wins" value={s.duelWins} accent="#34d399" />
           <StatTile label="Duel losses" value={s.duelLosses} accent="#f43f5e" />
         </div>
+        <CustomizeSection>
+          <Look2048 />
+        </CustomizeSection>
       </div>
     </GameShell>
   );

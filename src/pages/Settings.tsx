@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, PageHeader, Segmented } from "../components/ui";
-import { Customizer } from "../games/tetris/Customizer";
+import { GameLooks } from "../games/LookPickers";
 import { sfx } from "../lib/sfx";
 import { ACTION_LABELS, DEFAULT_KEYS, settingsStore, type Action } from "../lib/store";
 
@@ -36,7 +36,7 @@ export default function Settings() {
         }
       />
       <Card className="animate-in">
-        {tab === "appearance" && <Customizer cell={18} />}
+        {tab === "appearance" && <GameLooks cell={18} />}
         {tab === "controls" && <Controls />}
         {tab === "handling" && <Handling />}
         {tab === "audio" && <Audio />}

@@ -92,6 +92,18 @@ Nothing is stored in the browser except the session cookie.
 - Garbage sent: Double 1, Triple 2, Tetris 4, T-Spin Single/Double/Triple 2/4/6, Back-to-Back +1, Combo +1…+5, Perfect Clear +10. Your clears cancel incoming garbage first.
 - Customization: 10 block skins and 8 board themes, saved to your account.
 
+## Looks (all games)
+
+Every game has cosmetic options, picked in **Settings → Look** or in the **Customize** section of each game's page, and saved to your account. Definitions are in `src/games/looks.ts`.
+
+| Game | Options |
+| --- | --- |
+| Tetris | 10 block skins, 8 board themes, ghost piece on/off |
+| Snake Arena | 6 snake styles (Classic, 8-Bit, Neon, Candy, Scales, Wireframe) · 7 arenas. Snakes keep their player colors in every style. |
+| 2048 | 8 tile sets (Classic, Midnight, Neon, Pastel, Ocean, Ember, Monochrome, 8-Bit) |
+| Minesweeper | 6 board themes (Modern, Classic, Neon, Paper, Forest, Ocean) |
+| Connect Four | 6 disc sets · 6 boards. Your opponent sees the board in their own look. |
+
 ## Project layout
 
 ```

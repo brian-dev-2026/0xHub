@@ -58,6 +58,13 @@ export interface Settings {
   volume: number;
   keys: Record<Action, string[]>;
   reducedMotion: boolean;
+  /** Looks for the other games (ids from games/looks.ts). */
+  snakeSkin: string;
+  snakeArena: string;
+  tiles2048: string;
+  minesTheme: string;
+  c4Discs: string;
+  c4Board: string;
 }
 
 export const DEFAULT_KEYS: Record<Action, string[]> = {
@@ -81,6 +88,12 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.5,
   keys: DEFAULT_KEYS,
   reducedMotion: false,
+  snakeSkin: "classic",
+  snakeArena: "meadow",
+  tiles2048: "classic",
+  minesTheme: "modern",
+  c4Discs: "classic",
+  c4Board: "blue",
 };
 
 export const settingsStore = createStore<Settings>(DEFAULT_SETTINGS);

@@ -6,11 +6,14 @@ import { ConnectionBanner, ErrorPanel, GameShell, InvitePanel, MatchLobby } from
 import { GameLogo } from "../../components/GameLogo";
 import { Avatar } from "../../components/marks";
 import { Card, SectionTitle, StatTile } from "../../components/ui";
+import { settingsStore } from "../../lib/store";
+import { getC4Board, getDiscSet } from "../../games/looks";
+import { c4BoardStyle, discColor, discStyle } from "../../games/lookStyles";
 import { refreshMe, useMe } from "../../lib/auth";
 import { sfx } from "../../lib/sfx";
 import { useRoomSocket } from "../../lib/roomSocket";
+import { C4Look, CustomizeSection } from "../../games/LookPickers";
 
-const DISC = ["", "#f43f5e", "#facc15"];
 
 interface C4View {
   phase: "waiting" | "playing" | "ended";
@@ -60,12 +63,18 @@ function Home() {
             <li>Rematches swap who goes first. Wins and losses change your rating.</li>
           </ul>
         </Card>
+        <CustomizeSection>
+          <C4Look />
+        </CustomizeSection>
       </div>
     </GameShell>
   );
 }
 
 function Match({ code }: { code: string }) {
+  const look = settingsStore.use();
+  const discs = getDiscSet(look.c4Discs);
+  const boardLook = getC4Board(look.c4Board);
   const navigate = useNavigate();
   const me = useMe().user;
   const [v, setV] = useState<C4View | null>(null);
@@ -158,7 +167,7 @@ function Match({ code }: { code: string }) {
         </div>
 
         {/* board */}
-        <div className="relative rounded-3xl bg-linear-to-b from-blue-600 to-blue-800 p-3 shadow-[0_20px_60px_-20px_rgba(37,99,235,0.7)] ring-1 ring-white/20" onMouseLeave={() => setHover(null)}>
+        <div className="relative rounded-3xl p-3 ring-1 ring-white/20" style={c4BoardStyle(boardLook)} onMouseLeave={() => setHover(null)}>
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${C4_COLS}, ${cell})` }}>
             {Array.from({ length: C4_COLS }, (_, c) => (
               <button
@@ -170,7 +179,7 @@ function Match({ code }: { code: string }) {
                 onMouseEnter={() => setHover(c)}
                 disabled={!canDropIn(c)}
               >
-                {hover === c && canDropIn(c) && <span className="block rounded-full opacity-60" style={{ width: `calc(${cell} * 0.8)`, height: `calc(${cell} * 0.4)`, background: DISC[myDisc] }} />}
+                {hover === c && canDropIn(c) && <span className="block rounded-full opacity-60" style={{ width: `calc(${cell} * 0.8)`, height: `calc(${cell} * 0.4)`, background: discColor(discs, myDisc) }} />}
               </button>
             ))}
             {Array.from({ length: C4_ROWS * C4_COLS }, (_, i) => {
@@ -182,8 +191,8 @@ function Match({ code }: { code: string }) {
                 <button
                   key={i}
                   aria-label={`Column ${c + 1}, row ${r + 1}${disc ? (disc === myDisc ? ", your disc" : ", opponent disc") : ""}`}
-                  className={`relative rounded-full bg-blue-950/80 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)] ${hover === c && canDropIn(c) ? "ring-2 ring-white/20" : ""}`}
-                  style={{ width: cell, height: cell }}
+                  className={`relative rounded-full shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)] ${hover === c && canDropIn(c) ? "ring-2 ring-white/20" : ""}`}
+                  style={{ width: cell, height: cell, background: boardLook.hole }}
                   onClick={() => dropIn(c)}
                   onMouseEnter={() => setHover(c)}
                 >
@@ -191,7 +200,7 @@ function Match({ code }: { code: string }) {
                     <span
                       className={`absolute inset-[6%] rounded-full ${isLast ? "c4-drop" : ""} ${winSet.has(i) ? "c4-win" : ""}`}
                       style={{
-                        background: `radial-gradient(circle at 35% 30%, color-mix(in srgb, ${DISC[disc]} 40%, white), ${DISC[disc]} 55%, color-mix(in srgb, ${DISC[disc]} 70%, black))`,
+                        ...discStyle(discs, disc),
                         ["--rows" as string]: r + 1,
                       }}
                     />
@@ -220,7 +229,7 @@ function PlayerChip({ p, disc, active, right, offline }: { p: { name: string; av
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold">{p.name}</div>
         <div className={`flex items-center gap-1.5 text-xs ${right ? "justify-end" : ""}`}>
-          <span className="inline-block size-3 rounded-full" style={{ background: DISC[disc] }} />
+          <span className="inline-block size-3 rounded-full" style={{ background: discColor(getDiscSet(settingsStore.use().c4Discs), disc) }} />
           <span className={active ? "text-emerald-300" : "text-zinc-500"}>{offline ? "Disconnected" : active ? "Thinking…" : "Waiting"}</span>
         </div>
       </div>
