@@ -15,6 +15,7 @@ import {
 import { BUFFER_ROWS, STEP_MS } from "../shared/tetris/engine";
 import { PlayerSim, decodeEvents, runBatch, type SimState } from "../shared/tetris/sim";
 import { recordBattle } from "./db";
+import { CLOSE_STALE, connSeq, isStale } from "./connSeq";
 import type { Env } from "./env";
 
 type Identity = Omit<PlayerInfo, "skin">;
@@ -238,14 +239,20 @@ export class BattleRoom extends DurableObject<Env> {
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
+    const seq = connSeq(request);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ userId: user.id });
+    server.serializeAttachment({ userId: user.id, c: seq });
 
     let seat = this.seatOf(user.id);
     if (seat) {
+      const existing = this.socketsOf(user.id).filter((ws) => ws !== server);
+      if (isStale(seq, existing)) {
+        // An older connection attempt arrived late; the newer one keeps the seat.
+        server.close(CLOSE_STALE, "stale");
+        return new Response(null, { status: 101, webSocket: client });
+      }
       // Reconnect (or the same account in another tab): take over the seat.
-      for (const old of this.socketsOf(user.id)) {
-        if (old === server) continue;
+      for (const old of existing) {
         this.sendWs(old, { t: "replaced" });
         old.close(4001, "replaced");
       }

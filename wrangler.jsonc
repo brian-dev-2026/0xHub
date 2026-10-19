@@ -19,12 +19,18 @@
     "bindings": [
       { "name": "MATCHMAKER", "class_name": "Matchmaker" },
       { "name": "BATTLE_ROOM", "class_name": "BattleRoom" },
-      { "name": "ENDLESS_RUN", "class_name": "EndlessRun" }
+      { "name": "ENDLESS_RUN", "class_name": "EndlessRun" },
+      { "name": "SNAKE_ROOM", "class_name": "SnakeRoom" },
+      { "name": "DUEL2048_ROOM", "class_name": "Duel2048Room" },
+      { "name": "CONNECT4_ROOM", "class_name": "Connect4Room" },
+      { "name": "MINES_RUN", "class_name": "MinesRun" },
+      { "name": "RUN2048", "class_name": "Run2048" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Matchmaker", "BattleRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["EndlessRun"] }
+    { "tag": "v2", "new_sqlite_classes": ["EndlessRun"] },
+    { "tag": "v3", "new_sqlite_classes": ["SnakeRoom", "Duel2048Room", "Connect4Room", "MinesRun", "Run2048"] }
   ],
   "triggers": { "crons": ["17 3 * * *"] },
   "observability": { "enabled": true }

@@ -11,7 +11,7 @@ export class GameSocket {
   constructor(
     path: string,
     private onMessage: (msg: ServerMsg) => void,
-    private onClose: (unexpected: boolean) => void,
+    private onClose: (unexpected: boolean, code: number) => void,
     onOpen?: () => void,
   ) {
     this.ws = new WebSocket(wsUrl(path));
@@ -32,9 +32,9 @@ export class GameSocket {
       }
       this.onMessage(msg);
     });
-    this.ws.addEventListener("close", () => {
+    this.ws.addEventListener("close", (ev) => {
       clearInterval(this.pingTimer);
-      this.onClose(!this.closedByUs);
+      this.onClose(!this.closedByUs, ev.code);
     });
   }
 

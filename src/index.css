@@ -187,6 +187,15 @@ body {
   .mark-medal-silver { background: radial-gradient(circle at 35% 30%, #ffffff, #d4d4d8 45%, #71717a); }
   .mark-medal-bronze { background: radial-gradient(circle at 35% 30%, #ffe4cc, #fb923c 45%, #9a3412); }
 
+  /* Connect Four */
+  .c4-drop {
+    animation: c4-drop calc(0.12s + var(--rows) * 0.05s) cubic-bezier(0.5, 0, 0.75, 0) both;
+  }
+  .c4-win {
+    animation: c4-win 0.8s ease-in-out infinite alternate;
+    box-shadow: 0 0 0 3px #fff, 0 0 18px #fff;
+  }
+
   /* Tetris board chrome */
   .board-frame {
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.25));
@@ -266,3 +275,49 @@ body {
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #22223a; border-radius: 999px; border: 2px solid #07070d; }
+
+@keyframes c4-drop {
+  from { transform: translateY(calc(var(--rows) * -118%)); }
+  to { transform: translateY(0); }
+}
+@keyframes c4-win {
+  to { filter: brightness(1.35); }
+}
+
+.t2048-pop { animation: t2048-pop 0.16s ease-out; }
+.t2048-spawn { animation: t2048-spawn 0.18s ease-out; }
+@keyframes t2048-pop { 50% { transform: scale(1.14); } }
+@keyframes t2048-spawn { from { transform: scale(0.2); opacity: 0; } }
+
+/* Minesweeper marks (CSS-drawn flag and mine) */
+.mines-flag {
+  position: relative;
+  width: 0.62em;
+  height: 0.7em;
+  font-size: 18px;
+}
+.mines-flag::before {
+  content: "";
+  position: absolute;
+  left: 0.12em;
+  top: 0;
+  width: 0.08em;
+  height: 0.7em;
+  background: #e4e4e7;
+}
+.mines-flag::after {
+  content: "";
+  position: absolute;
+  left: 0.2em;
+  top: 0;
+  border-left: 0.42em solid #f43f5e;
+  border-top: 0.2em solid transparent;
+  border-bottom: 0.2em solid transparent;
+}
+.mines-mine {
+  width: 55%;
+  height: 55%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 35%, #71717a, #09090b 60%);
+  box-shadow: 0 0 0 2px rgba(9, 9, 11, 0.8);
+}

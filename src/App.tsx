@@ -10,6 +10,10 @@ import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Connect4Page from "./pages/games/Connect4";
+import Game2048Page from "./pages/games/Game2048";
+import MinesPage from "./pages/games/Mines";
+import SnakePage from "./pages/games/Snake";
 
 export default function App() {
   return (
@@ -28,6 +32,15 @@ export default function App() {
       <Route path="games/tetris/endless" element={<TetrisEndless />} />
       <Route path="games/tetris/battle" element={<TetrisBattle />} />
       <Route path="games/tetris/battle/:code" element={<TetrisBattle />} />
+      <Route path="games/snake" element={<SnakePage />} />
+      <Route path="games/snake/:code" element={<SnakePage />} />
+      <Route path="games/2048" element={<Game2048Page />} />
+      <Route path="games/2048/solo" element={<Game2048Page mode="solo" />} />
+      <Route path="games/2048/duel/:code" element={<Game2048Page mode="duel" />} />
+      <Route path="games/mines" element={<MinesPage />} />
+      <Route path="games/mines/:difficulty" element={<MinesPage />} />
+      <Route path="games/connect4" element={<Connect4Page />} />
+      <Route path="games/connect4/:code" element={<Connect4Page />} />
     </Routes>
     </AuthGate>
   );

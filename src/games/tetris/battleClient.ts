@@ -5,6 +5,7 @@ import { refreshMe } from "../../lib/auth";
 import { sfx } from "../../lib/sfx";
 import { createStore, settingsStore } from "../../lib/store";
 import { GameSocket } from "./net";
+import { CLOSE_STALE } from "../../lib/api";
 import { GameSession, type PanelState } from "./session";
 
 export type BattlePhase = "connecting" | "waiting" | "countdown" | "playing" | "ended" | "error";
@@ -123,7 +124,7 @@ export class BattleClient {
     const sock = new GameSocket(
       `/api/ws/room/${this.code}`,
       (m) => this.onMessage(m),
-      (unexpected) => this.onClose(unexpected, sock),
+      (unexpected, code) => this.onClose(unexpected, sock, code),
       () => {
         this.attempt = 0;
         this.set({ reconnecting: false });
@@ -133,8 +134,15 @@ export class BattleClient {
     this.sock = sock;
   }
 
-  private onClose(unexpected: boolean, sock: GameSocket) {
+  private onClose(unexpected: boolean, sock: GameSocket, code: number) {
     if (this.disposed || sock !== this.sock || !unexpected) return;
+    if (code === CLOSE_STALE) {
+      // A newer connection (another tab) owns this seat.
+      this.abandonSocket();
+      this.session.running = false;
+      this.set({ phase: "error", error: "This match was opened in another tab or window." });
+      return;
+    }
     const { phase } = this.ui.get();
     if (phase === "error") return;
     if (this.attempt >= RECONNECT_DELAYS.length) {

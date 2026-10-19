@@ -169,7 +169,12 @@ export interface UserStats {
 }
 
 export interface HistoryEntry {
-  mode: "endless" | "battle";
+  /** Which game; absent means Tetris (older entries). */
+  game?: "tetris" | GameId;
+  mode: string;
+  /** Pre-formatted text for non-Tetris games. */
+  label?: string;
+  detail?: string;
   ts: number;
   durationMs: number;
   lines: number;
@@ -195,6 +200,41 @@ export interface MeResponse {
   history: HistoryEntry[];
   highScores: HighScore[];
   settings: Record<string, unknown> | null;
+  games: GameSummaries;
+}
+
+// ---------- other games ----------
+
+export type GameId = "snake" | "2048" | "mines" | "connect4";
+export const GAME_IDS: GameId[] = ["snake", "2048", "mines", "connect4"];
+
+export interface ScoreEntry {
+  playerId: string;
+  name: string;
+  avatar: string;
+  color: string;
+  score: number;
+  durationMs: number;
+  ts: number;
+}
+
+export interface RatingEntry {
+  playerId: string;
+  name: string;
+  avatar: string;
+  color: string;
+  rating: number;
+  played: number;
+  wins: number;
+  losses: number;
+  draws: number;
+}
+
+export interface GameSummaries {
+  snake: { played: number; wins: number; bestScore: number };
+  "2048": { bestScore: number; duelPlayed: number; duelWins: number; duelLosses: number; rating: number };
+  mines: { beginner: number | null; intermediate: number | null; expert: number | null; won: number };
+  connect4: { played: number; wins: number; losses: number; draws: number; rating: number };
 }
 
 export const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;

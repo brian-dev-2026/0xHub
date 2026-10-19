@@ -36,11 +36,17 @@ import {
   type UserRow,
 } from "./db";
 import { sha256 } from "./auth";
+import { gameHistory, gameSummaries, topRatings, topScores } from "./gamesDb";
+import { isDifficulty } from "../shared/games/mines";
 import type { Env } from "./env";
 
 export { Matchmaker } from "./matchmaker";
 export { BattleRoom } from "./room";
 export { EndlessRun } from "./endless";
+export { SnakeRoom } from "./games/snakeRoom";
+export { Duel2048Room } from "./games/duel2048Room";
+export { Connect4Room } from "./games/connect4Room";
+export { MinesRun, Run2048 } from "./games/soloRuns";
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
@@ -102,13 +108,18 @@ async function requireUser(request: Request, env: Env): Promise<UserRow> {
 }
 
 async function me(env: Env, u: UserRow): Promise<MeResponse> {
-  const [stats, history, highScores, settings] = await Promise.all([
+  const [stats, tetrisHistory, highScores, settings, games, otherHistory] = await Promise.all([
     getStats(env.DB, u),
     getHistory(env.DB, u.id),
     getHighScores(env.DB, u.id),
     getSettings(env.DB, u.id),
+    gameSummaries(env.DB, u.id),
+    gameHistory(env.DB, u.id),
   ]);
-  return { user: toPublic(u), stats, history, highScores, settings };
+  const history = [...tetrisHistory.map((h) => ({ ...h, game: "tetris" as const })), ...otherHistory]
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 25);
+  return { user: toPublic(u), stats, history, highScores, settings, games };
 }
 
 async function startSession(request: Request, env: Env, u: UserRow) {
@@ -293,13 +304,77 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
 
   if (pathname === "/api/leaderboard" && method === "GET") {
-    const mode = url.searchParams.get("mode") === "battle" ? "battle" : "endless";
-    return json(mode === "battle" ? await topBattle(env.DB, 50) : await topEndless(env.DB, 50));
+    const game = url.searchParams.get("game") ?? "tetris";
+    const mode = url.searchParams.get("mode") ?? "";
+    switch (game) {
+      case "tetris":
+        return json(mode === "battle" ? await topBattle(env.DB, 50) : await topEndless(env.DB, 50));
+      case "snake":
+        return json(mode === "wins" ? await topRatings(env.DB, "snake", "wins") : await topScores(env.DB, "snake", "arena"));
+      case "2048":
+        return json(mode === "duel" ? await topRatings(env.DB, "2048", "rating") : await topScores(env.DB, "2048", "solo"));
+      case "mines":
+        return json(await topScores(env.DB, "mines", isDifficulty(mode) ? mode : "beginner"));
+      case "connect4":
+        return json(await topRatings(env.DB, "connect4", "rating"));
+      default:
+        return err("Unknown game", 404);
+    }
+  }
+
+  // ---------- verified solo runs: Minesweeper, 2048 ----------
+
+  if (pathname === "/api/runs/mines/start" && method === "POST") {
+    const u = await requireUser(request, env);
+    const b = await body(request);
+    if (!isDifficulty(b.difficulty)) return err("Unknown difficulty.");
+    await limit(env, `run-start:${u.id}`, 300, HOUR);
+    const runId = crypto.randomUUID();
+    const info = await env.MINES_RUN.get(env.MINES_RUN.idFromName(runId)).init(u.id, b.difficulty);
+    return json({ runId, ...info });
+  }
+  const minesAction = pathname.match(/^\/api\/runs\/mines\/([0-9a-f-]{36})\/action$/);
+  if (minesAction && method === "POST") {
+    const u = await requireUser(request, env);
+    const res = await env.MINES_RUN.get(env.MINES_RUN.idFromName(minesAction[1])).action(u.id, await body(request));
+    return json(res, res.ok ? 200 : 400);
+  }
+
+  if (pathname === "/api/runs/2048/start" && method === "POST") {
+    const u = await requireUser(request, env);
+    await limit(env, `run-start:${u.id}`, 300, HOUR);
+    const runId = crypto.randomUUID();
+    const { seed } = await env.RUN2048.get(env.RUN2048.idFromName(runId)).init(u.id);
+    return json({ runId, seed });
+  }
+  const run2048 = pathname.match(/^\/api\/runs\/2048\/([0-9a-f-]{36})\/input$/);
+  if (run2048 && method === "POST") {
+    const u = await requireUser(request, env);
+    const res = await env.RUN2048.get(env.RUN2048.idFromName(run2048[1])).input(u.id, await body(request, 400_000));
+    return json(res, res.ok ? 200 : 400);
   }
 
   // ---------- realtime ----------
 
   const isWs = request.headers.get("Upgrade") === "websocket";
+
+  // Other games: /api/ws/<game>/matchmake and /api/ws/<game>/room/<code>
+  const gameWs = pathname.match(/^\/api\/ws\/(snake|2048|connect4)\/(matchmake|room\/([A-Za-z0-9]+))$/);
+  if (gameWs) {
+    if (!isWs) return err("Expected WebSocket", 426);
+    const game = gameWs[1] as "snake" | "2048" | "connect4";
+    const u = await requireUser(request, env);
+    if (gameWs[2] === "matchmake") {
+      const req = withUser(request, u);
+      const headers = new Headers(req.headers);
+      headers.set("X-0xHub-Game", game);
+      return env.MATCHMAKER.get(env.MATCHMAKER.idFromName(`mm:${game}`)).fetch(new Request(req, { headers }));
+    }
+    const code = gameWs[3].toUpperCase();
+    if (!isValidRoomCode(code)) return err("Invalid room code");
+    const ns = game === "snake" ? env.SNAKE_ROOM : game === "2048" ? env.DUEL2048_ROOM : env.CONNECT4_ROOM;
+    return ns.get(ns.idFromName(`${game}:${code}`)).fetch(withUser(request, u, code));
+  }
 
   if (pathname === "/api/ws/matchmake") {
     if (!isWs) return err("Expected WebSocket", 426);

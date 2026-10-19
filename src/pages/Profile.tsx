@@ -9,7 +9,7 @@ import { changePassword, deleteAccount, logout, updateProfile, useMe } from "../
 import { fmtDuration, fmtNum } from "../lib/format";
 
 export default function Profile() {
-  const { user, stats } = useMe();
+  const { user, stats, games } = useMe();
   const navigate = useNavigate();
   const [name, setName] = useState(user.displayName);
   const [status, setStatus] = useState<"" | "saving" | "saved" | string>("");
@@ -133,6 +133,20 @@ export default function Profile() {
               <StatTile label="Wins" value={stats.wins} accent="#34d399" />
               <StatTile label="Losses" value={stats.losses} accent="#f43f5e" />
               <StatTile label="KOs" value={stats.kos} accent="#f472b6" />
+            </div>
+          </section>
+          <section>
+            <SectionTitle>Other games</SectionTitle>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatTile label="Snake wins" value={games.snake.wins} hint={`${games.snake.played} rounds · best ${games.snake.bestScore}`} accent="#4ade80" />
+              <StatTile label="2048 best" value={fmtNum(games["2048"].bestScore)} hint={`duel ${games["2048"].duelWins}W-${games["2048"].duelLosses}L · ${games["2048"].rating}`} accent="#f59e0b" />
+              <StatTile
+                label="Mines best"
+                value={games.mines.beginner === null ? "—" : `${(games.mines.beginner / 1000).toFixed(2)}s`}
+                hint={`Int. ${games.mines.intermediate === null ? "—" : `${(games.mines.intermediate / 1000).toFixed(1)}s`} · Exp. ${games.mines.expert === null ? "—" : `${(games.mines.expert / 1000).toFixed(1)}s`}`}
+                accent="#a1a1aa"
+              />
+              <StatTile label="Connect Four" value={games.connect4.rating} hint={`${games.connect4.wins}W-${games.connect4.losses}L-${games.connect4.draws}D`} accent="#f43f5e" />
             </div>
           </section>
           <div className="grid grid-cols-2 gap-3">
