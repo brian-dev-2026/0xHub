@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { G2048, type Dir, type G2048State } from "../../shared/games/g2048";
+import { CLOSE_STALE, connSeq, isStale } from "../connSeq";
 import { DIFFICULTIES, MinesBoard, type Difficulty, type MinesState, type RevealedCell } from "../../shared/games/mines";
 import type { Env } from "../env";
 import { recordScore } from "../gamesDb";
+import { clearStorage } from "../storage";
 
 const ABANDON_MS = 60 * 60 * 1000;
 
@@ -29,7 +31,7 @@ abstract class StoredRun<D> extends DurableObject<Env> {
   }
 
   protected async discard() {
-    await this.ctx.storage.deleteAll();
+    await clearStorage(this.ctx.storage);
     this.data = null;
   }
 
@@ -113,57 +115,135 @@ interface Run2048Data {
   userId: string;
   game: G2048State;
   createdAt: number;
-  invalid: boolean;
 }
 
-export interface Run2048Result {
-  ok: boolean;
-  error?: string;
-  finished?: boolean;
-  score?: number;
-  maxTile?: number;
-  best?: number;
-  rank?: number;
-}
+const SAVE_DELAY_MS = 3000;
+const MAX_MOVES_PER_SEC = 40;
 
-/** Verified 2048 solo run: server-issued seed, moves replayed in chunks. */
+/**
+ * One solo 2048 game, played over a WebSocket. The RNG never leaves this
+ * object: the browser slides tiles itself and sends the move, and we reply
+ * with the tile that spawned. Game over is decided here and the score
+ * recorded from our copy.
+ */
 export class Run2048 extends StoredRun<Run2048Data> {
+  private game: G2048 | null = null;
+  private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  private rate = { at: 0, n: 0 };
+
   async init(userId: string) {
     if (this.load()) throw new Error("run exists");
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    this.data = { userId, game: new G2048(seed).serialize(), createdAt: Date.now(), invalid: false };
+    this.data = { userId, game: new G2048(seed).serialize(), createdAt: Date.now() };
     this.save();
     await this.touch();
-    return { seed };
   }
 
-  async input(userId: string, b: Record<string, unknown>): Promise<Run2048Result> {
+  private current(): G2048 | null {
     const d = this.load();
-    if (!d) return { ok: false, error: "Unknown run" };
-    if (d.userId !== userId) return { ok: false, error: "Not your run" };
-    if (d.invalid) return { ok: false, error: "Run failed verification" };
-    const dirs = b.dirs;
-    if (!Array.isArray(dirs) || dirs.length > 20_000) return this.reject("Malformed input");
-    const g = G2048.deserialize(d.game);
-    for (const dir of dirs) if (!g.move(dir as Dir)) return this.reject("Run failed verification");
-    if (b.h !== g.hash()) return this.reject("Run failed verification");
-    d.game = g.serialize();
-
-    if (!g.over && b.final !== true) {
-      this.save();
-      await this.touch();
-      return { ok: true };
-    }
-    const { best, rank } = await recordScore(this.env.DB, d.userId, "2048", "solo", g.score, Date.now() - d.createdAt, { maxTile: g.maxTile, moves: g.moves });
-    await this.discard();
-    return { ok: true, finished: true, score: g.score, maxTile: g.maxTile, best, rank };
+    if (!d) return null;
+    this.game ??= G2048.deserialize(d.game);
+    return this.game;
   }
 
-  private reject(error: string): Run2048Result {
-    if (this.data) {
-      this.data.invalid = true;
-      this.save();
+  private sendWs(ws: WebSocket, msg: Record<string, unknown>) {
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {
+      /* closed */
     }
-    return { ok: false, error };
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    let userId = "";
+    try {
+      userId = JSON.parse(decodeURIComponent(request.headers.get("X-0xHub-User") ?? "")).id;
+    } catch {
+      /* fallthrough */
+    }
+    const d = this.load();
+    if (!d || !userId || d.userId !== userId) return new Response("Unknown run", { status: 404 });
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    const seq = connSeq(request);
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ userId, c: seq });
+    const existing = this.ctx.getWebSockets().filter((ws) => ws !== server);
+    if (isStale(seq, existing)) {
+      server.close(CLOSE_STALE, "stale");
+    } else {
+      for (const old of existing) {
+        this.sendWs(old, { t: "replaced" });
+        old.close(4001, "replaced");
+      }
+      this.sendWs(server, { t: "state", game: this.current()!.view() });
+    }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    if (typeof raw !== "string" || raw.length > 1024) return ws.close(1009, "message too large");
+    const now = Date.now();
+    if (now - this.rate.at >= 1000) this.rate = { at: now, n: 0 };
+    const tooFast = ++this.rate.n > MAX_MOVES_PER_SEC;
+    if (this.rate.n > MAX_MOVES_PER_SEC * 5) return ws.close(1008, "rate limit"); // flooding, not playing
+    let msg: { t?: string; n?: number; d?: number; h?: number; at?: number };
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (msg.t === "ping") return this.sendWs(ws, { t: "pong", at: msg.at });
+    if (msg.t !== "move") return;
+    const g = this.current();
+    if (!g || g.over) return;
+
+    // Too fast: drop the move and send our board so the client stays in step.
+    if (tooFast || msg.n !== g.moves + 1 || !g.slide(msg.d as Dir)) {
+      this.sendWs(ws, { t: "state", game: g.view() }); // out of step: resync
+      return;
+    }
+    const agreed = msg.h === g.hash();
+    const cell = g.spawn();
+    g.over = !g.canMove();
+    if (agreed) this.sendWs(ws, { t: "spawn", n: g.moves, cell, value: g.board[cell] ?? 0, over: g.over });
+    else this.sendWs(ws, { t: "state", game: g.view() });
+
+    if (g.over) return this.finish(ws, g);
+    this.saveSoon();
+  }
+
+  private saveSoon() {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      if (!this.data || !this.game) return;
+      this.data.game = this.game.serialize();
+      this.save();
+      void this.touch();
+    }, SAVE_DELAY_MS);
+  }
+
+  private async finish(ws: WebSocket, g: G2048) {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    const d = this.data!;
+    try {
+      const { best, rank } = await recordScore(this.env.DB, d.userId, "2048", "solo", g.score, Date.now() - d.createdAt, { maxTile: g.maxTile, moves: g.moves });
+      this.sendWs(ws, { t: "done", score: g.score, maxTile: g.maxTile, best, rank });
+    } catch (err) {
+      console.error("2048 record failed", err);
+      this.sendWs(ws, { t: "error", message: "Couldn't save your score." });
+    }
+    this.game = null;
+    await this.discard();
+    ws.close(1000, "done");
+  }
+
+  async alarm() {
+    clearTimeout(this.saveTimer);
+    this.game = null;
+    await super.alarm();
   }
 }

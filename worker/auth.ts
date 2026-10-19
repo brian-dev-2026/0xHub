@@ -41,6 +41,27 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return diff === 0;
 }
 
+const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"; // no 0/O, 1/I/L, U
+
+/** A new recovery code: 20 random characters (~98 bits) shown as XXXXX-XXXXX-XXXXX-XXXXX. */
+export function newRecoveryCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  let s = "";
+  for (let i = 0; i < 20; i++) {
+    // Reject 240–255 so every character is equally likely.
+    let b = bytes[i];
+    while (b >= 240) b = crypto.getRandomValues(new Uint8Array(1))[0];
+    s += RECOVERY_ALPHABET[b % 30];
+    if (i % 5 === 4 && i < 19) s += "-";
+  }
+  return s;
+}
+
+/** Canonical form for comparing: uppercase, no separators or spaces. */
+export function normalizeRecoveryCode(code: string): string {
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 /** A pretend verification so failed logins on unknown usernames take as long as real ones. */
 export async function dummyVerify(password: string): Promise<void> {
   await pbkdf2(password, new Uint8Array(16), PBKDF2_ITERATIONS);

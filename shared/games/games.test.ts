@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { C4_COLS, canDrop, drop, emptyBoard, isFull, winningLine } from "./connect4";
 import { G2048 } from "./g2048";
 import { MinesBoard } from "./mines";
-import { SNAKE_W, SnakeSim } from "./snake";
+import { SNAKE_H, SNAKE_W, SnakeSim } from "./snake";
 
 describe("Connect Four", () => {
   it("stacks discs and detects horizontal, vertical and diagonal wins", () => {
@@ -71,6 +71,24 @@ describe("2048", () => {
     a.move(1);
     c.move(1);
     expect(c.hash()).toBe(a.hash());
+  });
+
+  it("a client that slides and places the server's tiles stays identical, without the RNG", () => {
+    const server = new G2048(7);
+    const client = G2048.fromView(JSON.parse(JSON.stringify(server.view())));
+    expect(JSON.stringify(client.view())).not.toContain("rng");
+    const dirs = [0, 3, 2, 1, 3, 3, 2, 0] as const;
+    for (let i = 0; i < 400 && !server.over; i++) {
+      const d = dirs[i % dirs.length];
+      const moved = client.slide(d);
+      expect(server.slide(d)).toBe(moved);
+      if (!moved) continue;
+      expect(client.hash()).toBe(server.hash());
+      const cell = server.spawn();
+      server.over = !server.canMove();
+      client.place(cell, server.board[cell]);
+      expect(client.view()).toEqual(server.view());
+    }
   });
 });
 
@@ -172,5 +190,29 @@ describe("Snake Arena", () => {
     const st = sim.standings();
     expect(st[0].place).toBe(1);
     expect(st).toHaveLength(4);
+  });
+
+  it("spawns snakes facing open space (at least 10 cells to the wall)", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const sim = new SnakeSim(seed, members(4));
+      for (const s of sim.snakes) {
+        const x = s.body[0] % SNAKE_W;
+        const y = Math.floor(s.body[0] / SNAKE_W);
+        const room = [y, SNAKE_W - 1 - x, SNAKE_H - 1 - y, x][s.dir];
+        expect(room).toBeGreaterThanOrEqual(10);
+      }
+    }
+  });
+
+  it("resumes exactly from a serialized state", () => {
+    const a = new SnakeSim(77, members(4, true));
+    for (let i = 0; i < 300; i++) a.step();
+    const b = SnakeSim.deserialize(JSON.parse(JSON.stringify(a.serialize())));
+    for (let i = 0; i < 300; i++) {
+      a.step();
+      b.step();
+    }
+    expect(b.snapshot()).toEqual(a.snapshot());
+    expect(b.standings()).toEqual(a.standings());
   });
 });

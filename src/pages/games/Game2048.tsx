@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { DUEL_MS, DUEL_TARGET, G2048, type Dir, type G2048State } from "../../../shared/games/g2048";
+import { DUEL_MS, DUEL_TARGET, type Dir, type G2048, type G2048Spawn, type G2048View } from "../../../shared/games/g2048";
 import { isValidRoomCode } from "../../../shared/protocol";
 import { ConnectionBanner, ErrorPanel, GameShell, InvitePanel, MatchLobby, fmtMs } from "../../components/GameShell";
 import { GameLogo } from "../../components/GameLogo";
@@ -8,9 +8,10 @@ import { IconPlay } from "../../components/icons";
 import { Avatar, Check } from "../../components/marks";
 import { SectionTitle, StatTile } from "../../components/ui";
 import { Board2048, useBoardSize, useMoveInput } from "../../games/g2048/Board2048";
+import { RemoteBoard } from "../../games/g2048/remote";
 import { ApiError, refreshMe, useMe } from "../../lib/auth";
 import { fmtNum } from "../../lib/format";
-import { useRoomSocket } from "../../lib/roomSocket";
+import { useRoomSocket, type RoomSocket } from "../../lib/roomSocket";
 import { sfx } from "../../lib/sfx";
 
 async function post<T>(path: string, json: unknown): Promise<T> {
@@ -71,9 +72,11 @@ function Home() {
 function Solo() {
   const size = useBoardSize();
   const best = useMe().games["2048"].bestScore;
-  const [game, setGame] = useState<G2048 | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
+  const board = useRef<RemoteBoard | null>(null);
+  const sockRef = useRef<RoomSocket | null>(null);
   const [, redraw] = useState(0);
-  const run = useRef<{ id: string; pending: number[]; inFlight: boolean; failed: string } | null>(null);
   const [result, setResult] = useState<{ status: "pending" | "ok" | "failed"; rank?: number; error?: string } | null>(null);
   const [startError, setStartError] = useState("");
   const area = useRef<HTMLDivElement>(null);
@@ -81,71 +84,51 @@ function Solo() {
   const start = useCallback(async () => {
     setStartError("");
     setResult(null);
+    setLive(false);
+    board.current = null;
     try {
-      const { runId, seed } = await post<{ runId: string; seed: number }>("/api/runs/2048/start", {});
-      run.current = { id: runId, pending: [], inFlight: false, failed: "" };
-      setGame(new G2048(seed));
+      const { runId } = await post<{ runId: string }>("/api/runs/2048/start", {});
+      setRunId(runId);
+      setLive(true);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : "Couldn't start a game.");
     }
   }, []);
   useEffect(() => void start(), [start]);
 
-  const upload = useCallback(async (final = false) => {
-    const r = run.current;
-    const g = game;
-    if (!r || !g || r.failed) return;
-    for (let i = 0; i < 30 && r.inFlight; i++) await new Promise((x) => setTimeout(x, 100));
-    const dirs = r.pending;
-    r.pending = [];
-    r.inFlight = true;
-    for (let attempt = 0; attempt < (final ? 4 : 1); attempt++) {
-      try {
-        const res = await post<{ ok: boolean; finished?: boolean; rank?: number; error?: string }>(`/api/runs/2048/${r.id}/input`, { dirs, h: g.hash(), final });
-        r.inFlight = false;
-        if (res.finished) {
-          setResult({ status: "ok", rank: res.rank });
-          void refreshMe();
-        }
-        return;
-      } catch (e) {
-        if (e instanceof ApiError && e.status < 500) {
-          r.failed = e.message;
-          r.inFlight = false;
-          if (final) setResult({ status: "failed", error: e.message });
-          return;
-        }
-        await new Promise((x) => setTimeout(x, 700 * (attempt + 1)));
-      }
-    }
-    r.pending = [...dirs, ...r.pending]; // keep for the next try
-    r.inFlight = false;
-    if (final) setResult({ status: "failed", error: "Couldn't reach the server" });
-  }, [game]);
-
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (run.current?.pending.length) void upload();
-    }, 3000);
-    return () => clearInterval(iv);
-  }, [upload]);
-
-  const move = (d: Dir) => {
-    if (!game || game.over) return;
-    if (!game.move(d)) return;
-    run.current?.pending.push(d);
-    sfx.move();
-    if (game.lastMerged.length) sfx.clear(Math.min(4, game.lastMerged.length));
-    if (game.over) {
+  const onChange = (g: G2048, slid: boolean) => {
+    if (slid) {
+      sfx.move();
+      if (g.lastMerged.length) sfx.clear(Math.min(4, g.lastMerged.length));
+    } else if (g.over) {
       sfx.gameOver();
-      setResult({ status: "pending" });
-      void upload(true);
+      setResult((r) => r ?? { status: "pending" });
     }
     redraw((n) => n + 1);
   };
-  useMoveInput(move, !!game && !game.over, area);
 
-  const g = game;
+  const { sock, status, error } = useRoomSocket(live && runId ? `/api/ws/runs/2048/${runId}` : null, (m) => {
+    if (m.t === "state") {
+      if (board.current) board.current.reset(m.game);
+      else board.current = new RemoteBoard(m.game, (n, d, h) => sockRef.current?.send({ t: "move", n, d, h }), onChange);
+      redraw((n) => n + 1);
+    } else if (m.t === "spawn") board.current?.spawn(m as unknown as G2048Spawn);
+    else if (m.t === "done") {
+      setResult({ status: "ok", rank: m.rank });
+      setLive(false); // the run is over; close the socket
+      void refreshMe();
+    } else if (m.t === "error") {
+      setResult({ status: "failed", error: m.message });
+      setLive(false);
+    }
+  });
+  sockRef.current = sock;
+
+  const move = (d: Dir) => board.current?.press(d);
+  const g = board.current?.game ?? null;
+  useMoveInput(move, !!g && !g.over, area);
+  const failed = live && status === "error" ? error || "Lost connection to the game server." : "";
+
   return (
     <GameShell title="Solo" kicker="2048" back="/games/2048" right={<button className="btn btn-ghost px-3 py-2 text-xs" onClick={() => void start()}>New</button>}>
       <div ref={area} className="mx-auto flex w-full max-w-md touch-none flex-col items-center gap-4 select-none">
@@ -177,8 +160,9 @@ function Solo() {
             }
           />
         ) : (
-          <div className="grid place-items-center text-zinc-400" style={{ width: size, height: size }}>{startError || "Starting…"}</div>
+          <div className="grid place-items-center text-zinc-400" style={{ width: size, height: size }}>{startError || failed || "Starting…"}</div>
         )}
+        {g && <ConnectionBanner status={live ? status : "open"} />}
         <div className="text-xs text-zinc-500">Arrow keys, WASD or swipe.</div>
       </div>
     </GameShell>
@@ -199,11 +183,9 @@ function Mini({ label, value }: { label: string; value: React.ReactNode }) {
 interface DuelState {
   phase: "waiting" | "countdown" | "playing" | "ended";
   players: { id: string; name: string; avatar: string; color: string; connected: boolean }[];
-  seed: number;
   msUntilStart: number;
   msRemaining: number;
-  epoch: number;
-  you: G2048State | null;
+  you: G2048View | null;
   boards: Record<string, { board: number[]; score: number; maxTile: number; over: boolean; moves: number }>;
   rematch: string[];
   result: { winner: string | null; reason: string; deltas: Record<string, number> | null } | null;
@@ -216,13 +198,20 @@ function Duel({ code }: { code: string }) {
   const [st, setSt] = useState<DuelState | null>(null);
   const [opp, setOpp] = useState<DuelState["boards"][string] | null>(null);
   const [, redraw] = useState(0);
-  const game = useRef<G2048 | null>(null);
-  const epoch = useRef(0);
-  const pending = useRef<number[]>([]);
+  const board = useRef<RemoteBoard | null>(null);
+  const sockRef = useRef<RoomSocket | null>(null);
   const clock = useRef({ startAt: 0, endAt: 0 });
   const lastPhase = useRef("");
   const area = useRef<HTMLDivElement>(null);
   const valid = isValidRoomCode(code);
+
+  const onChange = (g: G2048, slid: boolean) => {
+    if (slid) {
+      sfx.move();
+      if (g.lastMerged.length) sfx.clear(Math.min(4, g.lastMerged.length));
+    }
+    redraw((n) => n + 1);
+  };
 
   const { sock, status, error } = useRoomSocket(valid ? `/api/ws/2048/room/${code}` : null, (m) => {
     if (m.t === "state") {
@@ -230,15 +219,11 @@ function Duel({ code }: { code: string }) {
       const now = performance.now();
       clock.current = { startAt: now + s.msUntilStart, endAt: now + s.msUntilStart + (s.phase === "countdown" ? DUEL_MS : 0) };
       if (s.phase === "playing") clock.current.endAt = now + s.msRemaining;
-      if (s.phase === "countdown" && lastPhase.current !== "countdown") {
-        game.current = new G2048(s.seed);
-        pending.current = [];
-      } else if (s.you && s.phase === "playing") {
-        // A full state mid-game means we (re)joined: the server's copy of our board is authoritative.
-        game.current = G2048.deserialize(s.you);
-        pending.current = [];
+      // A full state means a new game or a (re)join: the server's copy of our board is authoritative.
+      if (s.you) {
+        if (board.current) board.current.reset(s.you);
+        else board.current = new RemoteBoard(s.you, (n, d, h) => sockRef.current?.send({ t: "move", n, d, h }), onChange);
       }
-      epoch.current = s.epoch;
       const oppId = s.players.find((p) => p.id !== me.id)?.id;
       setOpp(oppId ? (s.boards[oppId] ?? null) : null);
       if (s.phase === "ended" && lastPhase.current !== "ended" && lastPhase.current) {
@@ -250,36 +235,21 @@ function Duel({ code }: { code: string }) {
       setSt(s);
     } else if (m.t === "board") {
       setOpp({ board: m.board, score: m.score, maxTile: m.maxTile, over: m.over, moves: m.moves });
-    } else if (m.t === "resync") {
-      game.current = G2048.deserialize(m.state);
-      epoch.current = m.epoch;
-      pending.current = [];
-      redraw((n) => n + 1);
-    } else if (m.t === "presence") {
+    } else if (m.t === "spawn") board.current?.spawn(m as unknown as G2048Spawn);
+    else if (m.t === "resync") board.current?.reset(m.game); else if (m.t === "presence") {
       setSt((cur) => (cur ? { ...cur, players: m.players } : cur));
     }
   });
 
-  // Send moves in small batches.
+  sockRef.current = sock;
   useEffect(() => {
-    const iv = setInterval(() => {
-      const g = game.current;
-      if (!pending.current.length || !g) return;
-      if (sock?.send({ t: "moves", epoch: epoch.current, dirs: pending.current, h: g.hash() })) pending.current = [];
-    }, 80);
     const t = setInterval(() => redraw((n) => n + 1), 250);
-    return () => (clearInterval(iv), clearInterval(t));
-  }, [sock]);
+    return () => clearInterval(t);
+  }, []);
 
   const playing = st?.phase === "playing" || (st?.phase === "countdown" && performance.now() >= clock.current.startAt);
   const move = (d: Dir) => {
-    const g = game.current;
-    if (!g || g.over || !playing) return;
-    if (!g.move(d)) return;
-    pending.current.push(d);
-    sfx.move();
-    if (g.lastMerged.length) sfx.clear(Math.min(4, g.lastMerged.length));
-    redraw((n) => n + 1);
+    if (playing) board.current?.press(d);
   };
   useMoveInput(move, !!playing, area);
 
@@ -300,7 +270,7 @@ function Duel({ code }: { code: string }) {
   const countdown = st.phase === "countdown" ? Math.ceil((clock.current.startAt - now) / 1000) : 0;
   const remaining = st.phase === "playing" || (st.phase === "countdown" && countdown <= 0) ? clock.current.endAt - now : st.phase === "countdown" ? DUEL_MS : 0;
   const oppP = st.players.find((p) => p.id !== me.id);
-  const g = game.current;
+  const g = board.current?.game;
   const small = Math.round(size * 0.62);
 
   let overlay: React.ReactNode = null;

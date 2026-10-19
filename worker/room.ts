@@ -17,6 +17,7 @@ import { PlayerSim, decodeEvents, runBatch, type SimState } from "../shared/tetr
 import { recordBattle } from "./db";
 import { CLOSE_STALE, connSeq, isStale } from "./connSeq";
 import type { Env } from "./env";
+import { clearStorage } from "./storage";
 
 type Identity = Omit<PlayerInfo, "skin">;
 
@@ -529,7 +530,7 @@ export class BattleRoom extends DurableObject<Env> {
       }
       this.data.phase = "waiting";
       if (!this.data.seats.length) {
-        await this.ctx.storage.deleteAll();
+        await clearStorage(this.ctx.storage);
         this.ensureTable();
         this.data ={ room: this.data.room, phase: "waiting", startsAt: 0, endsAt: 0, seats: [] };
         this.sims.clear();

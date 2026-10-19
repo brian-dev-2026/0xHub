@@ -5,7 +5,7 @@ import { AuthForm } from "../components/AuthGate";
 import { Avatar } from "../components/Layout";
 import { Card, PageHeader, SectionTitle, StatTile } from "../components/ui";
 import { PASSWORD_MIN } from "../../shared/protocol";
-import { changePassword, deleteAccount, logout, updateProfile, useMe } from "../lib/auth";
+import { changePassword, deleteAccount, logout, newRecoveryCode, updateProfile, useMe } from "../lib/auth";
 import { fmtDuration, fmtNum } from "../lib/format";
 
 export default function Profile() {
@@ -114,6 +114,7 @@ export default function Profile() {
           )}
 
           {!user.isGuest && <ChangePassword />}
+          {!user.isGuest && <RecoveryCodeCard has={user.hasRecoveryCode} />}
           <DeleteAccount isGuest={user.isGuest} />
         </div>
 
@@ -194,6 +195,42 @@ function ChangePassword() {
         <input className="input" type="password" autoComplete="new-password" placeholder="Confirm new password" aria-label="Confirm new password" value={confirmNext} onChange={(e) => setConfirmNext(e.target.value)} required />
         {status && <div role="status" className={`text-sm ${status.ok ? "text-emerald-300" : "text-rose-300"}`}>{status.msg}</div>}
         <button className="btn btn-ghost w-full" disabled={busy}>{busy ? "Saving…" : "Update password"}</button>
+      </form>
+    </Card>
+  );
+}
+
+function RecoveryCodeCard({ has }: { has: boolean }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await newRecoveryCode(password);
+      setPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't create a code.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="font-semibold">Recovery code</div>
+      <p className="mt-1 text-sm text-zinc-400">
+        {has
+          ? "You have a recovery code. If you lost it, create a new one; the old one stops working."
+          : "You don't have a recovery code yet. Without one, a forgotten password can't be reset."}
+      </p>
+      <form onSubmit={submit} className="mt-4 space-y-3">
+        <input className="input" type="password" autoComplete="current-password" placeholder="Confirm with your password" aria-label="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        {error && <div role="alert" className="text-sm text-rose-300">{error}</div>}
+        <button className="btn btn-ghost w-full" disabled={busy || !password}>{busy ? "Creating…" : has ? "Create a new code" : "Create my recovery code"}</button>
       </form>
     </Card>
   );

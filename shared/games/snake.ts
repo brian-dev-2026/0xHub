@@ -67,6 +67,14 @@ export interface SnakeStanding {
   best: number;
 }
 
+/** Everything needed to restore a simulation exactly. */
+export interface SnakeSimState {
+  rng: number;
+  tick: number;
+  food: number[];
+  snakes: Snake[];
+}
+
 export class SnakeSim {
   snakes: Snake[];
   food = new Set<number>();
@@ -105,9 +113,11 @@ export class SnakeSim {
   private spawn(s: Snake): boolean {
     const occ = this.occupied();
     for (let attempt = 0; attempt < 200; attempt++) {
-      const dir = Math.floor(this.rng.next() * 4) as SnakeDir;
+      const horizontal = this.rng.next() < 0.5;
       const x = 6 + Math.floor(this.rng.next() * (SNAKE_W - 12));
       const y = 6 + Math.floor(this.rng.next() * (SNAKE_H - 12));
+      // Face the far side of the arena, so a player always has time to react.
+      const dir: SnakeDir = horizontal ? (x < SNAKE_W / 2 ? 1 : 3) : y < SNAKE_H / 2 ? 2 : 0;
       const body: number[] = [];
       for (let i = 0; i < START_LEN; i++) body.push(this.idx(x - DX[dir] * i, y - DY[dir] * i));
       // keep some room ahead of the head too
@@ -267,6 +277,19 @@ export class SnakeSim {
       prev = s;
       return { id: s.id, bot: s.bot, place, score: s.score, kills: s.kills, deaths: s.deaths, best: s.best };
     });
+  }
+
+  serialize(): SnakeSimState {
+    return { rng: this.rng.s, tick: this.tick, food: [...this.food], snakes: structuredClone(this.snakes) };
+  }
+
+  static deserialize(st: SnakeSimState): SnakeSim {
+    const sim = new SnakeSim(0, []);
+    sim.rng = new Rng(st.rng);
+    sim.tick = st.tick;
+    sim.food = new Set(st.food);
+    sim.snakes = structuredClone(st.snakes);
+    return sim;
   }
 
   removePlayer(id: string) {

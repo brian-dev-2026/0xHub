@@ -1,5 +1,7 @@
-// Deterministic 2048 engine shared by browser and server. Tile spawns come
-// from a seeded RNG, so the same seed + the same moves = the same game.
+// 2048 engine shared by browser and server. Tile spawns come from a seeded
+// RNG that only the server holds: the browser slides tiles itself (`slide`)
+// and the server sends back where the new tile appears (`place`), so a
+// client can't look ahead at upcoming tiles.
 
 import { Rng } from "../tetris/engine";
 
@@ -8,6 +10,23 @@ export const SIZE = 4;
 export type Dir = 0 | 1 | 2 | 3;
 export const DUEL_MS = 5 * 60_000;
 export const DUEL_TARGET = 2048;
+
+/** What a player may see of a game: everything except the RNG. */
+export interface G2048View {
+  board: number[];
+  score: number;
+  moves: number;
+  over: boolean;
+}
+
+/** The server's reply to one move. */
+export interface G2048Spawn {
+  /** Move number this spawn belongs to. */
+  n: number;
+  cell: number;
+  value: number;
+  over: boolean;
+}
 
 export interface G2048State {
   board: number[];
@@ -39,13 +58,22 @@ export class G2048 {
     return Math.max(...this.board);
   }
 
-  private spawn() {
+  /** Server only: add a random tile. Returns its cell, or -1 if the board is full. */
+  spawn(): number {
     const empty: number[] = [];
     for (let i = 0; i < this.board.length; i++) if (this.board[i] === 0) empty.push(i);
-    if (!empty.length) return;
+    if (!empty.length) return -1;
     const cell = empty[Math.floor(this.rng.next() * empty.length)];
     this.board[cell] = this.rng.next() < 0.9 ? 2 : 4;
     this.lastSpawn = cell;
+    return cell;
+  }
+
+  /** Client: put the tile the server spawned. */
+  place(cell: number, value: number) {
+    if (cell >= 0 && cell < this.board.length) this.board[cell] = value;
+    this.lastSpawn = cell;
+    this.over = !this.canMove();
   }
 
   /** Indices of one line in the order tiles slide toward. */
@@ -60,8 +88,16 @@ export class G2048 {
     return out;
   }
 
-  /** Apply a move. Returns false (and changes nothing) if no tile can move. */
+  /** Apply a move and spawn a tile (server side). Returns false (and changes nothing) if no tile can move. */
   move(dir: Dir): boolean {
+    if (!this.slide(dir)) return false;
+    this.spawn();
+    this.over = !this.canMove();
+    return true;
+  }
+
+  /** Slide and merge without spawning. Returns false (and changes nothing) if no tile can move. */
+  slide(dir: Dir): boolean {
     if (this.over || ![0, 1, 2, 3].includes(dir)) return false;
     let moved = false;
     this.lastMerged = [];
@@ -85,8 +121,7 @@ export class G2048 {
     }
     if (!moved) return false;
     this.moves++;
-    this.spawn();
-    this.over = !this.canMove();
+    this.lastSpawn = -1;
     return true;
   }
 
@@ -109,6 +144,21 @@ export class G2048 {
     h ^= this.moves & 0xffff;
     h = Math.imul(h, 0x01000193);
     return h >>> 0;
+  }
+
+  view(): G2048View {
+    return { board: [...this.board], score: this.score, moves: this.moves, over: this.over };
+  }
+
+  /** Client copy of a game: no RNG, tiles arrive from the server. */
+  static fromView(v: G2048View): G2048 {
+    const g = new G2048(0);
+    g.board = [...v.board];
+    g.score = v.score;
+    g.moves = v.moves;
+    g.over = v.over;
+    g.lastSpawn = -1;
+    return g;
   }
 
   serialize(): G2048State {

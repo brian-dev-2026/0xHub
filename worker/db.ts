@@ -19,6 +19,7 @@ export interface UserRow {
   id: string;
   username: string | null;
   password_hash: string | null;
+  recovery_hash: string | null;
   is_guest: number;
   display_name: string;
   avatar: string;
@@ -37,6 +38,7 @@ export function toPublic(u: UserRow): PublicUser {
     id: u.id,
     username: u.username,
     isGuest: !!u.is_guest,
+    hasRecoveryCode: !!u.recovery_hash,
     displayName: u.display_name,
     avatar: u.avatar,
     color: u.color,
@@ -301,6 +303,10 @@ export async function rateLimit(db: D1Database, key: string, limit: number, wind
 
 // ---------- account management ----------
 
+export async function setRecoveryHash(db: D1Database, id: string, recoveryHash: string): Promise<void> {
+  await db.prepare(`UPDATE users SET recovery_hash = ? WHERE id = ?`).bind(recoveryHash, id).run();
+}
+
 export async function setPassword(db: D1Database, id: string, passwordHash: string): Promise<void> {
   await db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).bind(passwordHash, id).run();
 }
@@ -326,7 +332,7 @@ export async function deleteAccount(db: D1Database, id: string): Promise<void> {
     db.prepare(`DELETE FROM game_ratings WHERE user_id = ?`).bind(id),
     db
       .prepare(
-        `UPDATE users SET username = NULL, password_hash = NULL, is_guest = 1, display_name = 'Deleted player',
+        `UPDATE users SET username = NULL, password_hash = NULL, recovery_hash = NULL, is_guest = 1, display_name = 'Deleted player',
          avatar = 'none', color = '#6b7280', rating = 1000, wins = 0, losses = 0, draws = 0, kos = 0 WHERE id = ?`,
       )
       .bind(id),

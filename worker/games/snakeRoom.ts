@@ -1,4 +1,4 @@
-import { SNAKE_COLORS, SNAKE_MAX_PLAYERS, SNAKE_ROUND_MS, SNAKE_TICK_MS, SnakeSim, type SnakeMember } from "../../shared/games/snake";
+import { SNAKE_COLORS, SNAKE_MAX_PLAYERS, SNAKE_ROUND_MS, SNAKE_TICK_MS, SnakeSim, type SnakeMember, type SnakeSimState } from "../../shared/games/snake";
 import { recordSnakeRound } from "../gamesDb";
 import { BaseRoom, type AnyMsg, type Member } from "./baseRoom";
 
@@ -6,6 +6,8 @@ const COUNTDOWN_MS = 3000;
 const AUTO_START_MS = 8000;
 const BOT_NAMES = ["Byte", "Glitch", "Pixel", "Nibble", "Rogue", "Echo"];
 const BOT_AVATARS = ["t-S", "t-Z", "p-W", "p-N"];
+/** Save the running round this often (in ticks) so a restart resumes it. */
+const SAVE_EVERY_TICKS = 20;
 
 interface RoomState {
   phase: "lobby" | "countdown" | "playing" | "ended";
@@ -17,6 +19,10 @@ interface RoomState {
   startsAt: number;
   endsAt: number;
   results: { id: string; name: string; avatar: string; color: string; bot: boolean; place: number; score: number; kills: number }[] | null;
+  roster: SnakeMember[];
+  /** The running round, saved every few seconds. */
+  sim: SnakeSimState | null;
+  savedAt: number;
 }
 
 /**
@@ -34,17 +40,42 @@ export class SnakeRoom extends BaseRoom<RoomState> {
     startsAt: 0,
     endsAt: 0,
     results: null,
+    roster: [],
+    sim: null,
+    savedAt: 0,
   };
   private sim: SnakeSim | null = null;
   private loop: ReturnType<typeof setInterval> | undefined;
-  private roster: SnakeMember[] = [];
 
   protected onLoaded() {
-    // The simulation lives in memory only; if the room restarted mid-round, go back to the lobby.
-    if (this.state.phase === "playing" || this.state.phase === "countdown") {
-      this.state.phase = "lobby";
-      this.state.results = null;
+    this.state.roster ??= [];
+    // The room restarted (deploy, crash) mid-round: resume from the last save.
+    // The round clock is paused for the downtime so nobody loses playing time.
+    if (this.state.phase === "playing") {
+      if (!this.state.sim) {
+        this.state.phase = "lobby";
+        return;
+      }
+      this.sim = SnakeSim.deserialize(this.state.sim);
+      const downtime = Math.max(0, Date.now() - this.state.savedAt);
+      this.state.endsAt += downtime;
+      this.state.savedAt = Date.now(); // the saved round now continues from here
+      this.startLoop();
+    } else if (this.state.phase === "countdown") {
+      this.state.startsAt = Math.max(this.state.startsAt, Date.now() + 1000);
     }
+  }
+
+  private saveSim() {
+    if (!this.sim) return;
+    this.state.sim = this.sim.serialize();
+    this.state.savedAt = Date.now();
+    this.persist();
+  }
+
+  private startLoop() {
+    clearInterval(this.loop);
+    this.loop = setInterval(() => void this.tick(), SNAKE_TICK_MS);
   }
 
   protected canJoin(): string | null {
@@ -123,24 +154,25 @@ export class SnakeRoom extends BaseRoom<RoomState> {
     this.state.phase = "countdown";
     this.state.startsAt = Date.now() + COUNTDOWN_MS;
     this.state.results = null;
-    this.roster = humans.map((m, i) => ({ id: m.id, name: m.name, avatar: m.avatar, color: SNAKE_COLORS[i % SNAKE_COLORS.length], bot: false }));
-    const needBots = this.state.fillBots || this.roster.length < 2 ? SNAKE_MAX_PLAYERS - this.roster.length : 0;
+    this.state.roster = humans.map((m, i) => ({ id: m.id, name: m.name, avatar: m.avatar, color: SNAKE_COLORS[i % SNAKE_COLORS.length], bot: false }));
+    const roster = this.state.roster;
+    const needBots = this.state.fillBots || roster.length < 2 ? SNAKE_MAX_PLAYERS - roster.length : 0;
     for (let i = 0; i < needBots; i++) {
-      const n = this.roster.length;
-      this.roster.push({ id: `bot-${n}`, name: `${BOT_NAMES[(n + Date.now()) % BOT_NAMES.length]} (bot)`, avatar: BOT_AVATARS[n % BOT_AVATARS.length], color: SNAKE_COLORS[n], bot: true });
+      const n = roster.length;
+      roster.push({ id: `bot-${n}`, name: `${BOT_NAMES[(n + Date.now()) % BOT_NAMES.length]} (bot)`, avatar: BOT_AVATARS[n % BOT_AVATARS.length], color: SNAKE_COLORS[n], bot: true });
     }
     this.pushLobby();
-    this.broadcast({ t: "roster", players: this.roster });
+    this.broadcast({ t: "roster", players: roster });
   }
 
   private startRound() {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    this.sim = new SnakeSim(seed, this.roster);
+    this.sim = new SnakeSim(seed, this.state.roster);
     this.state.phase = "playing";
     this.state.endsAt = Date.now() + SNAKE_ROUND_MS;
+    this.saveSim();
     this.pushLobby();
-    clearInterval(this.loop);
-    this.loop = setInterval(() => void this.tick(), SNAKE_TICK_MS);
+    this.startLoop();
   }
 
   private async tick() {
@@ -150,6 +182,7 @@ export class SnakeRoom extends BaseRoom<RoomState> {
     const msLeft = this.state.endsAt - Date.now();
     this.broadcast({ t: "tick", s: sim.snapshot(), msLeft });
     if (msLeft <= 0) await this.endRound();
+    else if (sim.tick % SAVE_EVERY_TICKS === 0) this.saveSim();
   }
 
   private async endRound() {
@@ -157,8 +190,9 @@ export class SnakeRoom extends BaseRoom<RoomState> {
     const sim = this.sim;
     if (!sim) return;
     this.sim = null;
+    this.state.sim = null;
     const standings = sim.standings();
-    const byId = new Map(this.roster.map((r) => [r.id, r]));
+    const byId = new Map(this.state.roster.map((r) => [r.id, r]));
     this.state.results = standings.map((s) => {
       const r = byId.get(s.id)!;
       return { id: s.id, name: r.name, avatar: r.avatar, color: r.color, bot: r.bot, place: s.place, score: s.score, kills: s.kills };

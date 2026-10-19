@@ -7,6 +7,24 @@ type Msg = { t: string; [k: string]: any };
 const RETRY = [300, 700, 1500, 3000, 5000, 5000];
 
 /**
+ * Close a socket without browser noise: closing one that's still connecting
+ * makes Firefox and Safari log an error, so wait for it to open first.
+ */
+export function closeSocket(ws: WebSocket | null | undefined, code = 1000) {
+  if (!ws) return;
+  if (ws.readyState === WebSocket.CONNECTING) {
+    ws.onopen = () => ws.close(code);
+    ws.onmessage = null;
+    return;
+  }
+  try {
+    ws.close(code);
+  } catch {
+    /* already closed */
+  }
+}
+
+/**
  * A game-room WebSocket with automatic reconnect. Messages go to `onMessage`;
  * the server re-sends the full state on every (re)connect.
  */
@@ -99,11 +117,7 @@ export class RoomSocket {
     if (leave) this.send({ t: "leave" });
     this.disposed = true;
     clearInterval(this.ping);
-    try {
-      this.ws?.close(1000);
-    } catch {
-      /* ignore */
-    }
+    closeSocket(this.ws);
   }
 }
 
@@ -133,6 +147,8 @@ export function useMatchmaking(game: string, onMatched: (room: string, auto: boo
   const cb = useRef(onMatched);
   cb.current = onMatched;
 
+  // Close queue sockets at once, even mid-connect: letting an abandoned search
+  // finish connecting could match it with a real player.
   const stop = () => {
     ws.current?.close();
     ws.current = null;

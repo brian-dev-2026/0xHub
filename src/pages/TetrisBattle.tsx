@@ -31,7 +31,7 @@ function Lobby() {
   const retries = useRef(0);
 
   const stopSearch = useCallback(() => {
-    mm.current?.close();
+    mm.current?.close(true);
     mm.current = null;
   }, []);
   useEffect(() => stopSearch, [stopSearch]);

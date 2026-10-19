@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { PASSWORD_MIN, USERNAME_RE } from "../../shared/protocol";
 import { BoardPreview } from "../games/tetris/Customizer";
-import { authStore, loadMe, login, playAsGuest, register } from "../lib/auth";
+import { authStore, loadMe, login, playAsGuest, recoverAccount, register } from "../lib/auth";
 import { Logo } from "./Layout";
+import { RecoveryCodeDialog } from "./RecoveryCode";
 import { Segmented } from "./ui";
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -11,7 +12,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void loadMe();
   }, []);
 
-  if (status === "signedIn") return <>{children}</>;
+  if (status === "signedIn") {
+    return (
+      <>
+        {children}
+        <RecoveryCodeDialog />
+      </>
+    );
+  }
   if (status === "loading") {
     return (
       <div className="grid min-h-screen place-items-center">
@@ -48,6 +56,9 @@ export function AuthForm({ initialMode = "login", upgrade = false }: { initialMo
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);
+
+  if (forgot) return <RecoverForm onBack={() => setForgot(false)} />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -106,6 +117,73 @@ export function AuthForm({ initialMode = "login", upgrade = false }: { initialMo
       {error && <div role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300 ring-1 ring-rose-500/30">{error}</div>}
       <button className="btn btn-primary w-full" disabled={busy}>
         {busy ? "Please wait…" : mode === "login" ? "Sign in" : upgrade ? "Save my progress" : "Create account"}
+      </button>
+      {mode === "login" && (
+        <button type="button" className="block w-full text-center text-xs text-zinc-400 hover:text-white" onClick={() => setForgot(true)}>
+          Forgot password?
+        </button>
+      )}
+    </form>
+  );
+}
+
+function RecoverForm({ onBack }: { onBack: () => void }) {
+  const [username, setUsername] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (password !== confirm) return setError("Passwords don't match.");
+    setBusy(true);
+    try {
+      await recoverAccount(username.trim(), code, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <div>
+        <div className="font-semibold">Reset your password</div>
+        <p className="text-sm text-zinc-400">Use the recovery code you saved when you created your account.</p>
+      </div>
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold text-zinc-400">Username</span>
+        <input className="input" autoComplete="username" value={username} maxLength={20} onChange={(e) => setUsername(e.target.value)} required />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold text-zinc-400">Recovery code</span>
+        <input
+          className="input font-mono uppercase"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+          value={code}
+          maxLength={40}
+          onChange={(e) => setCode(e.target.value)}
+          required
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold text-zinc-400">New password</span>
+        <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold text-zinc-400">Confirm new password</span>
+        <input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+      </label>
+      {error && <div role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-300 ring-1 ring-rose-500/30">{error}</div>}
+      <button className="btn btn-primary w-full" disabled={busy}>{busy ? "Please wait…" : "Reset password"}</button>
+      <button type="button" className="block w-full text-center text-xs text-zinc-400 hover:text-white" onClick={onBack}>
+        Back to sign in
       </button>
     </form>
   );

@@ -149,6 +149,8 @@ export interface PublicUser {
   id: string;
   username: string | null;
   isGuest: boolean;
+  /** Whether the account has a recovery code for resetting a forgotten password. */
+  hasRecoveryCode: boolean;
   displayName: string;
   avatar: string;
   color: string;

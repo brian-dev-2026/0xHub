@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { CLOSE_STALE, connSeq, isStale } from "../connSeq";
 import type { Env } from "../env";
+import { clearStorage } from "../storage";
 
 export interface Identity {
   id: string;
@@ -65,7 +66,7 @@ export abstract class BaseRoom<S extends object> extends DurableObject<Env> {
   }
 
   protected async wipe() {
-    await this.ctx.storage.deleteAll();
+    await clearStorage(this.ctx.storage);
     this.ensureTable();
   }
 

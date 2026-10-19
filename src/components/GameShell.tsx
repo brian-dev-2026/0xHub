@@ -18,11 +18,11 @@ export function GameShell({ title, kicker, back, onBack, right, children }: {
       <div className="app-bg" />
       <header className="flex items-center justify-between px-4 py-4">
         {onBack ? (
-          <button onClick={onBack} className="btn btn-ghost px-3 py-2">
+          <button onClick={onBack} className="btn btn-ghost px-3 py-2" aria-label="Leave">
             <IconArrowLeft /> <span className="hidden sm:inline">Leave</span>
           </button>
         ) : (
-          <Link to={back} className="btn btn-ghost px-3 py-2">
+          <Link to={back} className="btn btn-ghost px-3 py-2" aria-label="Back">
             <IconArrowLeft /> <span className="hidden sm:inline">Back</span>
           </Link>
         )}

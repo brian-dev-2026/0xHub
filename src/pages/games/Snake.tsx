@@ -236,21 +236,29 @@ function Room({ code }: { code: string }) {
     <GameShell title="Snake Arena" kicker="Arena" back="/games/snake" onBack={leave}>
       <ConnectionBanner status={status} />
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-start justify-center gap-4">
-        <div className="relative">
-          <Arena snaps={snaps} meId={me.id} />
-          {lobby.phase === "countdown" && (
-            <div className="absolute inset-0 grid place-items-center bg-black/40">
-              <div key={startsIn} className="countdown text-7xl font-bold text-white">{startsIn || "GO!"}</div>
-            </div>
-          )}
-          {mine && !mine.alive && lobby.phase === "playing" && (
-            <div className="absolute inset-x-0 top-1/3 text-center">
-              <div className="inline-block rounded-xl bg-black/60 px-4 py-2 text-sm">Respawning in {Math.ceil(mine.respawnIn / 10)}…</div>
-            </div>
-          )}
+        <div className="flex flex-col items-center gap-3">
+          {/* Phones: time and your score above the arena; the full panel is below the controls. */}
+          <div className="flex w-full items-center justify-between px-1 text-sm sm:hidden">
+            <span className={`font-mono text-lg font-bold ${msLeft < 15000 ? "text-rose-400" : ""}`}>{fmtMs(msLeft)}</span>
+            <span>You <b className="font-mono">{mine?.score ?? 0}</b></span>
+          </div>
+          <div className="relative">
+            <Arena snaps={snaps} meId={me.id} />
+            {lobby.phase === "countdown" && (
+              <div className="absolute inset-0 grid place-items-center bg-black/40">
+                <div key={startsIn} className="countdown text-7xl font-bold text-white">{startsIn || "GO!"}</div>
+              </div>
+            )}
+            {mine && !mine.alive && lobby.phase === "playing" && (
+              <div className="absolute inset-x-0 top-1/3 text-center">
+                <div className="inline-block rounded-xl bg-black/60 px-4 py-2 text-sm">Respawning in {Math.ceil(mine.respawnIn / 10)}…</div>
+              </div>
+            )}
+          </div>
+          <TouchPad onDir={(d) => sock?.send({ t: "dir", d })} />
         </div>
         <div className="w-full max-w-xs space-y-3 sm:w-56">
-          <div className="glass rounded-2xl p-4 text-center">
+          <div className="glass hidden rounded-2xl p-4 text-center sm:block">
             <div className="text-[10px] font-bold tracking-[0.2em] text-zinc-400 uppercase">Time left</div>
             <div className={`font-mono text-3xl font-bold ${msLeft < 15000 ? "text-rose-400" : ""}`}>{fmtMs(msLeft)}</div>
           </div>
@@ -263,7 +271,6 @@ function Room({ code }: { code: string }) {
               </div>
             ))}
           </div>
-          <TouchPad onDir={(d) => sock?.send({ t: "dir", d })} />
         </div>
       </div>
     </GameShell>
@@ -274,7 +281,7 @@ function TouchPad({ onDir }: { onDir: (d: number) => void }) {
   const b = "grid h-14 place-items-center rounded-2xl bg-white/8 ring-1 ring-white/15 active:bg-violet-500/40 touch-none";
   const icon = { width: 26, height: 26 };
   return (
-    <div className="hidden grid-cols-3 gap-2 pointer-coarse:grid">
+    <div className="hidden w-full max-w-xs grid-cols-3 gap-2 pointer-coarse:grid">
       <span />
       <button className={b} aria-label="Up" onPointerDown={() => onDir(0)}><IconChevronDown {...icon} className="rotate-180" /></button>
       <span />

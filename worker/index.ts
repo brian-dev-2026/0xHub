@@ -6,6 +6,8 @@ import {
   deleteSession,
   dummyVerify,
   hashPassword,
+  newRecoveryCode,
+  normalizeRecoveryCode,
   readCookie,
   sessionCookie,
   userIdForToken,
@@ -27,6 +29,7 @@ import {
   revokeSessions,
   saveSettings,
   setPassword,
+  setRecoveryHash,
   toPublic,
   topBattle,
   topEndless,
@@ -122,9 +125,16 @@ async function me(env: Env, u: UserRow): Promise<MeResponse> {
   return { user: toPublic(u), stats, history, highScores, settings, games };
 }
 
-async function startSession(request: Request, env: Env, u: UserRow) {
+async function startSession(request: Request, env: Env, u: UserRow, extra: Record<string, unknown> = {}) {
   const { token, expiresAt } = await createSession(env.DB, u.id);
-  return json(await me(env, u), 200, { "set-cookie": sessionCookie(request, token, expiresAt) });
+  return json({ ...(await me(env, u)), ...extra }, 200, { "set-cookie": sessionCookie(request, token, expiresAt) });
+}
+
+/** Give an account a fresh recovery code (replacing any old one) and return it for showing once. */
+async function issueRecoveryCode(env: Env, userId: string): Promise<string> {
+  const code = newRecoveryCode();
+  await setRecoveryHash(env.DB, userId, await hashPassword(normalizeRecoveryCode(code)));
+  return code;
 }
 
 function validateCredentials(b: Record<string, unknown>): { username: string; password: string } {
@@ -173,7 +183,8 @@ async function route(request: Request, env: Env): Promise<Response> {
       } catch {
         return err("That username is taken.", 409);
       }
-      return json(await me(env, (await getUser(env.DB, current.id))!));
+      const recoveryCode = await issueRecoveryCode(env, current.id);
+      return json({ ...(await me(env, (await getUser(env.DB, current.id))!)), recoveryCode });
     }
     let user: UserRow;
     try {
@@ -181,7 +192,32 @@ async function route(request: Request, env: Env): Promise<Response> {
     } catch {
       return err("That username is taken.", 409);
     }
-    return startSession(request, env, user);
+    const recoveryCode = await issueRecoveryCode(env, user.id);
+    return startSession(request, env, (await getUser(env.DB, user.id))!, { recoveryCode });
+  }
+
+  // Forgot password: username + recovery code -> new password. The code is
+  // single-use; a new one is issued, and every other session is signed out.
+  if (pathname === "/api/auth/recover" && method === "POST") {
+    const b = await body(request);
+    const username = typeof b.username === "string" ? b.username.trim() : "";
+    const code = typeof b.code === "string" ? normalizeRecoveryCode(b.code) : "";
+    const password = typeof b.password === "string" ? b.password : "";
+    if (password.length < PASSWORD_MIN) return err(`Password must be at least ${PASSWORD_MIN} characters.`);
+    if (password.length > 200) return err("Password is too long.");
+    if (!username || code.length !== 20) return err("Wrong username or recovery code.", 401);
+    await limit(env, `recover-ip:${clientIp(request)}`, 10, HOUR);
+    await limit(env, `recover-user:${username.toLowerCase()}`, 5, HOUR);
+    const user = await getUserByUsername(env.DB, username);
+    if (!user?.recovery_hash) {
+      await dummyVerify(code);
+      return err("Wrong username or recovery code.", 401);
+    }
+    if (!(await verifyPassword(code, user.recovery_hash))) return err("Wrong username or recovery code.", 401);
+    await setPassword(env.DB, user.id, await hashPassword(password));
+    await revokeSessions(env.DB, user.id);
+    const recoveryCode = await issueRecoveryCode(env, user.id);
+    return startSession(request, env, (await getUser(env.DB, user.id))!, { recoveryCode });
   }
 
   if (pathname === "/api/auth/login" && method === "POST") {
@@ -270,6 +306,17 @@ async function route(request: Request, env: Env): Promise<Response> {
     return json({ ok: true });
   }
 
+  if (pathname === "/api/me/recovery" && method === "POST") {
+    const u = await requireUser(request, env);
+    if (u.is_guest || !u.password_hash) return err("Create an account first.");
+    const b = await body(request);
+    const password = typeof b.password === "string" ? b.password : "";
+    await limit(env, `password:${u.id}`, 10, HOUR);
+    if (!(await verifyPassword(password, u.password_hash))) return err("Your password is wrong.", 401);
+    const recoveryCode = await issueRecoveryCode(env, u.id);
+    return json({ ...(await me(env, (await getUser(env.DB, u.id))!)), recoveryCode });
+  }
+
   if (pathname === "/api/me" && method === "DELETE") {
     const u = await requireUser(request, env);
     if (!u.is_guest && u.password_hash) {
@@ -344,19 +391,21 @@ async function route(request: Request, env: Env): Promise<Response> {
     const u = await requireUser(request, env);
     await limit(env, `run-start:${u.id}`, 300, HOUR);
     const runId = crypto.randomUUID();
-    const { seed } = await env.RUN2048.get(env.RUN2048.idFromName(runId)).init(u.id);
-    return json({ runId, seed });
-  }
-  const run2048 = pathname.match(/^\/api\/runs\/2048\/([0-9a-f-]{36})\/input$/);
-  if (run2048 && method === "POST") {
-    const u = await requireUser(request, env);
-    const res = await env.RUN2048.get(env.RUN2048.idFromName(run2048[1])).input(u.id, await body(request, 400_000));
-    return json(res, res.ok ? 200 : 400);
+    await env.RUN2048.get(env.RUN2048.idFromName(runId)).init(u.id);
+    return json({ runId });
   }
 
   // ---------- realtime ----------
 
   const isWs = request.headers.get("Upgrade") === "websocket";
+
+  // Solo 2048 is played over a socket so tiles can come from the server one move at a time.
+  const run2048 = pathname.match(/^\/api\/ws\/runs\/2048\/([0-9a-f-]{36})$/);
+  if (run2048) {
+    if (!isWs) return err("Expected WebSocket", 426);
+    const u = await requireUser(request, env);
+    return env.RUN2048.get(env.RUN2048.idFromName(run2048[1])).fetch(withUser(request, u));
+  }
 
   // Other games: /api/ws/<game>/matchmake and /api/ws/<game>/room/<code>
   const gameWs = pathname.match(/^\/api\/ws\/(snake|2048|connect4)\/(matchmake|room\/([A-Za-z0-9]+))$/);

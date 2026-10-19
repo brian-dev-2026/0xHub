@@ -16,6 +16,8 @@ export class GameSocket {
   ) {
     this.ws = new WebSocket(wsUrl(path));
     this.ws.addEventListener("open", () => {
+      // Closed while still connecting (see close()): finish closing now.
+      if (this.closedByUs) return this.ws.close(1000);
       onOpen?.();
       this.pingTimer = setInterval(() => this.send({ t: "ping", at: performance.now() }), 3000);
     });
@@ -48,9 +50,15 @@ export class GameSocket {
     return true;
   }
 
-  close() {
+  /**
+   * Close the socket. A room socket that's still connecting is left to finish
+   * and closed on open (closing mid-connect makes Firefox and Safari log an
+   * error); pass `immediate` for queue sockets, which must never connect late.
+   */
+  close(immediate = false) {
     this.closedByUs = true;
     clearInterval(this.pingTimer);
+    if (!immediate && this.ws.readyState === WebSocket.CONNECTING) return;
     try {
       this.ws.close(1000);
     } catch {

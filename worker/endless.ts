@@ -3,6 +3,7 @@ import { STEP_MS } from "../shared/tetris/engine";
 import { PlayerSim, decodeEvents, runBatch, type SimState } from "../shared/tetris/sim";
 import { recordEndless } from "./db";
 import type { Env } from "./env";
+import { clearStorage } from "./storage";
 
 interface RunData {
   userId: string;
@@ -96,7 +97,7 @@ export class EndlessRun extends DurableObject<Env> {
     const e = sim.engine;
     const result = { score: e.score, lines: e.lines, level: e.level, durationMs: Math.round(sim.steps * STEP_MS) };
     const { best, rank } = await recordEndless(this.env.DB, data.userId, result);
-    await this.ctx.storage.deleteAll();
+    await clearStorage(this.ctx.storage);
     this.data = null;
     this.sim = null;
     return { ok: true, finished: true, ...result, best, rank };
@@ -111,7 +112,7 @@ export class EndlessRun extends DurableObject<Env> {
   }
 
   async alarm() {
-    await this.ctx.storage.deleteAll(); // abandoned run
+    await clearStorage(this.ctx.storage); // abandoned run
     this.data = null;
     this.sim = null;
   }

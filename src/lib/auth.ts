@@ -10,6 +10,11 @@ interface AuthState {
 
 export const authStore = createStore<AuthState>({ status: "loading", me: null });
 
+/** A recovery code the server just issued; shown once, then forgotten. */
+export const recoveryCodeStore = createStore<{ code: string | null }>({ code: null });
+
+type WithRecovery = MeResponse & { recoveryCode?: string };
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -33,7 +38,9 @@ async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Pr
 
 let applyingServerSettings = false;
 
-function setMe(me: MeResponse, loadSettings = false) {
+function setMe(res: WithRecovery, loadSettings = false) {
+  const { recoveryCode, ...me } = res;
+  if (recoveryCode) recoveryCodeStore.set({ code: recoveryCode });
   if (loadSettings) {
     applyingServerSettings = true;
     applyServerSettings(me.settings);
@@ -82,7 +89,17 @@ export async function login(username: string, password: string) {
 /** Creates an account — or, when signed in as a guest, upgrades the guest and keeps their progress. */
 export async function register(username: string, password: string) {
   const wasSignedIn = authStore.get().status === "signedIn";
-  setMe(await api<MeResponse>("/api/auth/register", { method: "POST", json: { username, password } }), !wasSignedIn);
+  setMe(await api<WithRecovery>("/api/auth/register", { method: "POST", json: { username, password } }), !wasSignedIn);
+}
+
+/** Forgot password: reset it with the account's recovery code. Signs in and issues a new code. */
+export async function recoverAccount(username: string, code: string, password: string) {
+  setMe(await api<WithRecovery>("/api/auth/recover", { method: "POST", json: { username, code, password } }), true);
+}
+
+/** Replace the account's recovery code (the old one stops working). */
+export async function newRecoveryCode(password: string) {
+  setMe(await api<WithRecovery>("/api/me/recovery", { method: "POST", json: { password } }));
 }
 
 export async function logout() {
