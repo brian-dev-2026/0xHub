@@ -140,7 +140,7 @@ async function issueRecoveryCode(env: Env, userId: string): Promise<string> {
 function validateCredentials(b: Record<string, unknown>): { username: string; password: string } {
   const username = typeof b.username === "string" ? b.username.trim() : "";
   const password = typeof b.password === "string" ? b.password : "";
-  if (!USERNAME_RE.test(username)) throw new HttpError("Username must be 3–20 letters, numbers or underscores.", 400);
+  if (!USERNAME_RE.test(username)) throw new HttpError("Usernames are 3–20 letters, numbers or _ (no spaces).", 400);
   if (password.length < PASSWORD_MIN) throw new HttpError(`Password must be at least ${PASSWORD_MIN} characters.`, 400);
   if (password.length > 200) throw new HttpError("Password is too long.", 400);
   return { username, password };

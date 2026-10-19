@@ -64,7 +64,8 @@ export function AuthForm({ initialMode = "login", upgrade = false }: { initialMo
     e.preventDefault();
     setError("");
     if (mode === "register") {
-      if (!USERNAME_RE.test(username)) return setError("Username must be 3–20 letters, numbers or underscores.");
+      // Phone keyboards often add a trailing space after autocomplete; the server trims too.
+      if (!USERNAME_RE.test(username.trim())) return setError("Usernames are 3–20 letters, numbers or _ (no spaces).");
       if (password.length < PASSWORD_MIN) return setError(`Password must be at least ${PASSWORD_MIN} characters.`);
       if (password !== confirm) return setError("Passwords don't match.");
     }
@@ -95,7 +96,7 @@ export function AuthForm({ initialMode = "login", upgrade = false }: { initialMo
       )}
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-zinc-400">Username</span>
-        <input className="input" autoComplete="username" value={username} maxLength={20} onChange={(e) => setUsername(e.target.value)} required />
+        <input className="input" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={username} maxLength={24} onChange={(e) => setUsername(e.target.value)} required />
       </label>
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-zinc-400">Password</span>
@@ -157,7 +158,7 @@ function RecoverForm({ onBack }: { onBack: () => void }) {
       </div>
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-zinc-400">Username</span>
-        <input className="input" autoComplete="username" value={username} maxLength={20} onChange={(e) => setUsername(e.target.value)} required />
+        <input className="input" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={username} maxLength={24} onChange={(e) => setUsername(e.target.value)} required />
       </label>
       <label className="block">
         <span className="mb-1 block text-xs font-semibold text-zinc-400">Recovery code</span>
