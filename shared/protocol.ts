@@ -207,8 +207,8 @@ export interface MeResponse {
 
 // ---------- other games ----------
 
-export type GameId = "snake" | "2048" | "mines" | "connect4";
-export const GAME_IDS: GameId[] = ["snake", "2048", "mines", "connect4"];
+export type GameId = "snake" | "2048" | "mines" | "connect4" | "chess" | "generals";
+export const GAME_IDS: GameId[] = ["snake", "2048", "mines", "connect4", "chess", "generals"];
 
 export interface ScoreEntry {
   playerId: string;
@@ -237,6 +237,8 @@ export interface GameSummaries {
   "2048": { bestScore: number; duelPlayed: number; duelWins: number; duelLosses: number; rating: number };
   mines: { beginner: number | null; intermediate: number | null; expert: number | null; won: number };
   connect4: { played: number; wins: number; losses: number; draws: number; rating: number };
+  chess: { played: number; wins: number; losses: number; draws: number; rating: number };
+  generals: { played: number; wins: number; losses: number; draws: number; rating: number };
 }
 
 export const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;

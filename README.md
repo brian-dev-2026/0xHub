@@ -1,6 +1,6 @@
 # 0xHub
 
-A modern gaming hub with five games. Every result is decided or verified by the server.
+A modern gaming hub with seven games. Every result is decided or verified by the server.
 
 | Game | Modes | Fairness model |
 | --- | --- | --- |
@@ -9,6 +9,8 @@ A modern gaming hub with five games. Every result is decided or verified by the 
 | **2048 Duel** | Solo (verified high score) · 1v1 race to 2048 (5-minute cap, same tiles for both) | The server holds the RNG and places every new tile; clients only slide |
 | **Minesweeper Rush** | Time attack: Beginner, Intermediate, Expert | Mine layout never leaves the server; the server reveals cells and times the run |
 | **Connect Four** | 1v1 with a 30-second turn clock, rematches alternate who starts | Fully server-authoritative; clients send only "drop in column c" |
+| **Chess** | Rated 1v1 with time controls (1+0, 3+2, 5+0, 10+0, 15+10) · vs computer (4 levels) | Server validates every move and runs the clocks |
+| **Game of the Generals** | Rated 1v1 with a secret 3-minute setup, 10 min + 5 s per move · vs computer | Server is the arbiter: it holds both armies and never reveals enemy ranks |
 
 All five have quick match and/or private rooms where relevant, global leaderboards, Elo ratings for the 1v1 modes, and stats and history on the dashboard and profile. The Tetris display name is one constant: `GAME_NAME` in `src/games/registry.ts`.
 
@@ -42,6 +44,9 @@ The browser never reports results. It only sends **inputs**, and the server repl
 - **2048** (`Run2048`, `Duel2048Room`): the RNG never leaves the server, so upcoming tiles can't be predicted. The browser slides tiles instantly and sends the move (with a state hash); the server replies with the tile that spawned. Moves pressed while a reply is in flight are queued. In duels both boards start from the same seed, and the opponent's board streams live.
 - **Minesweeper Rush** (`MinesRun`): mines are placed on the server after your first click (never on or next to it). Each click returns only the newly revealed cells, so the layout can't be read from the page. The official time runs from your first click reaching the server to your winning click reaching the server.
 - **Connect Four** (`Connect4Room`): the server owns the board, the turn and the 30-second clock.
+- **Chess** (`ChessRoom`, rules in `shared/games/chess.ts`): full FIDE rules — castling, en passant, promotion, check/mate/stalemate; insufficient material, fivefold repetition and the 75-move rule end the game automatically; threefold repetition and the 50-move rule are claimable; draw offers; flag fall loses unless the opponent can't possibly mate (then it's a draw). Fischer increment; clocks start after each side's first move, and a game with no first move within 30 s is aborted (unrated). The move generator is verified with standard perft counts.
+- **Game of the Generals** (`GeneralsRoom`, rules in `shared/games/generals.ts`): official Salpakan rules — 21 pieces, secret setup in your first three rows, one-square orthogonal moves, the arbiter's challenge table (Spy beats officers, Private beats Spy, attacking Flag beats Flag), and the flag win (reaching the far row; if it lands next to an enemy it must survive one more turn). Each player only ever receives their own ranks; after a challenge they learn which piece was eliminated, never the enemy's rank. Everything is revealed when the game ends.
+- The computer opponents for both run in the browser and are unrated practice.
 - What this does **not** stop: a bot that plays well using legitimate inputs. Verification proves a game was played by the rules, not by a human.
 
 ## Reliability
@@ -103,6 +108,8 @@ Every game has cosmetic options, picked in **Settings → Look** or in the **Cus
 | 2048 | 8 tile sets (Classic, Midnight, Neon, Pastel, Ocean, Ember, Monochrome, 8-Bit) |
 | Minesweeper | 6 board themes (Modern, Classic, Neon, Paper, Forest, Ocean) |
 | Connect Four | 6 disc sets · 6 boards. Your opponent sees the board in their own look. |
+| Chess | 6 boards (Wood, Tournament, Ice, Slate, Synthwave, Marble) · 5 piece sets |
+| Game of the Generals | 4 piece sets · 4 boards. Pieces show the rank insignia (stars, suns, triangles, chevrons). |
 
 ## Project layout
 

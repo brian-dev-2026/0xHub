@@ -57,4 +57,22 @@ export const GAMES: GameMeta[] = [
     modes: ["1v1"],
     gradient: "from-rose-500/40 via-pink-600/30 to-fuchsia-600/30",
   },
+  {
+    id: "chess",
+    title: "Chess",
+    tagline: "Official rules, real clocks, rated games.",
+    href: "/games/chess",
+    status: "live",
+    modes: ["1v1", "vs computer"],
+    gradient: "from-amber-700/40 via-yellow-800/30 to-stone-700/30",
+  },
+  {
+    id: "generals",
+    title: "Game of the Generals",
+    tagline: "Hidden ranks, a secret setup and a silent arbiter.",
+    href: "/games/generals",
+    status: "live",
+    modes: ["1v1", "vs computer"],
+    gradient: "from-lime-700/40 via-green-800/30 to-stone-700/30",
+  },
 ];

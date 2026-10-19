@@ -41,6 +41,7 @@ import {
 import { sha256 } from "./auth";
 import { gameHistory, gameSummaries, topRatings, topScores } from "./gamesDb";
 import { isDifficulty } from "../shared/games/mines";
+import { chessTimeControl } from "../shared/games/clocks";
 import type { Env } from "./env";
 
 export { Matchmaker } from "./matchmaker";
@@ -49,6 +50,8 @@ export { EndlessRun } from "./endless";
 export { SnakeRoom } from "./games/snakeRoom";
 export { Duel2048Room } from "./games/duel2048Room";
 export { Connect4Room } from "./games/connect4Room";
+export { ChessRoom } from "./games/chessRoom";
+export { GeneralsRoom } from "./games/generalsRoom";
 export { MinesRun, Run2048 } from "./games/soloRuns";
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -363,7 +366,9 @@ async function route(request: Request, env: Env): Promise<Response> {
       case "mines":
         return json(await topScores(env.DB, "mines", isDifficulty(mode) ? mode : "beginner"));
       case "connect4":
-        return json(await topRatings(env.DB, "connect4", "rating"));
+      case "chess":
+      case "generals":
+        return json(await topRatings(env.DB, game, "rating"));
       default:
         return err("Unknown game", 404);
     }
@@ -408,20 +413,23 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
 
   // Other games: /api/ws/<game>/matchmake and /api/ws/<game>/room/<code>
-  const gameWs = pathname.match(/^\/api\/ws\/(snake|2048|connect4)\/(matchmake|room\/([A-Za-z0-9]+))$/);
+  const gameWs = pathname.match(/^\/api\/ws\/(snake|2048|connect4|chess|generals)\/(matchmake|room\/([A-Za-z0-9]+))$/);
   if (gameWs) {
     if (!isWs) return err("Expected WebSocket", 426);
-    const game = gameWs[1] as "snake" | "2048" | "connect4";
+    const game = gameWs[1] as "snake" | "2048" | "connect4" | "chess" | "generals";
     const u = await requireUser(request, env);
     if (gameWs[2] === "matchmake") {
       const req = withUser(request, u);
       const headers = new Headers(req.headers);
       headers.set("X-0xHub-Game", game);
-      return env.MATCHMAKER.get(env.MATCHMAKER.idFromName(`mm:${game}`)).fetch(new Request(req, { headers }));
+      // Chess players are only paired with others who picked the same time control.
+      const queue = game === "chess" ? `mm:chess:${chessTimeControl(url.searchParams.get("tc")).id}` : `mm:${game}`;
+      return env.MATCHMAKER.get(env.MATCHMAKER.idFromName(queue)).fetch(new Request(req, { headers }));
     }
     const code = gameWs[3].toUpperCase();
     if (!isValidRoomCode(code)) return err("Invalid room code");
-    const ns = game === "snake" ? env.SNAKE_ROOM : game === "2048" ? env.DUEL2048_ROOM : env.CONNECT4_ROOM;
+    const rooms = { snake: env.SNAKE_ROOM, "2048": env.DUEL2048_ROOM, connect4: env.CONNECT4_ROOM, chess: env.CHESS_ROOM, generals: env.GENERALS_ROOM };
+    const ns = rooms[game] as DurableObjectNamespace;
     return ns.get(ns.idFromName(`${game}:${code}`)).fetch(withUser(request, u, code));
   }
 

@@ -4,10 +4,15 @@ import { IconPalette } from "../components/icons";
 import { Card, SectionTitle, Segmented } from "../components/ui";
 import { settingsStore, type Settings } from "../lib/store";
 import { Board2048 } from "./g2048/Board2048";
-import { C4_BOARDS, DISC_SETS, MINES_THEMES, SNAKE_ARENAS, SNAKE_SKINS, TILE_SETS, getC4Board, getDiscSet, getMinesTheme, getSnakeArena, getSnakeSkin, getTileSet, tileColors } from "./looks";
+import { CHESS_BOARDS, CHESS_PIECE_SETS, GG_BOARDS, GG_PIECE_SETS, getChessBoard, getChessPieces, getGGBoard, getGGPieces, C4_BOARDS, DISC_SETS, MINES_THEMES, SNAKE_ARENAS, SNAKE_SKINS, TILE_SETS, getC4Board, getDiscSet, getMinesTheme, getSnakeArena, getSnakeSkin, getTileSet, tileColors } from "./looks";
 import { c4BoardStyle, discStyle, minesCellClass, minesVars } from "./lookStyles";
 import { drawArena } from "./snake/render";
 import { Customizer } from "./tetris/Customizer";
+import { Chess } from "../../shared/games/chess";
+import type { Rank } from "../../shared/games/generals";
+import { ChessBoard } from "./chess/Board";
+import { ChessPiece } from "./chess/Piece";
+import { GGPieceView } from "./generals/Insignia";
 
 // ---------- shared bits ----------
 
@@ -252,9 +257,94 @@ export function C4Look() {
   );
 }
 
+// ---------- Chess ----------
+
+const CHESS_PREVIEW = new Chess("r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 1 5");
+
+export function ChessLook() {
+  const s = settingsStore.use();
+  return (
+    <Layout preview={<ChessBoard chess={CHESS_PREVIEW} orientation="w" size={256} interactive={false} lastMove={{ from: 11, to: 19 }} />}>
+      <Group title="Board">
+        {CHESS_BOARDS.map((b) => (
+          <Option key={b.id} label={b.name} active={getChessBoard(s.chessBoard).id === b.id} onClick={() => set({ chessBoard: b.id })}>
+            <span className="grid grid-cols-4 overflow-hidden rounded-md">
+              {Array.from({ length: 8 }, (_, i) => (
+                <span key={i} className="block size-6" style={{ background: (i + Math.floor(i / 4)) % 2 ? b.dark : b.light }} />
+              ))}
+            </span>
+          </Option>
+        ))}
+      </Group>
+      <Group title="Pieces">
+        {CHESS_PIECE_SETS.map((p) => (
+          <Option key={p.id} label={p.name} active={getChessPieces(s.chessPieces).id === p.id} onClick={() => set({ chessPieces: p.id })}>
+            <span className="flex rounded-md bg-zinc-500/40 px-1">
+              <ChessPiece type="k" color="w" set={p} size={32} />
+              <ChessPiece type="n" color="b" set={p} size={32} />
+            </span>
+          </Option>
+        ))}
+      </Group>
+    </Layout>
+  );
+}
+
+// ---------- Game of the Generals ----------
+
+/** A 9x3 strip: two of the opponent's (hidden) pieces and a few of yours. */
+const GG_PREVIEW: (null | { mine: boolean; rank?: Rank })[] = [
+  null, { mine: false }, null, { mine: false }, null, null, { mine: false }, null, null,
+  null, null, { mine: true, rank: "SPY" }, null, { mine: true, rank: "G5" }, null, null, { mine: true, rank: "PVT" }, null,
+  { mine: true, rank: "CPT" }, null, { mine: true, rank: "FLG" }, { mine: true, rank: "COL" }, null, { mine: true, rank: "SGT" }, null, null, { mine: true, rank: "G3" },
+];
+
+function GGStrip({ piecesId, boardId, cell = 34 }: { piecesId: string; boardId: string; cell?: number }) {
+  const set = getGGPieces(piecesId);
+  const b = getGGBoard(boardId);
+  return (
+    <div className="grid gap-px rounded-lg p-px" style={{ gridTemplateColumns: `repeat(9, ${cell}px)`, background: b.line }}>
+      {GG_PREVIEW.map((p, i) => (
+        <span key={i} className="grid place-items-center" style={{ width: cell, height: cell, background: (Math.floor(i / 9) + i) % 2 ? b.dark : b.light }}>
+          {p && <GGPieceView rank={p.rank} mine={p.mine} set={set} size={cell - 4} />}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function GeneralsLook() {
+  const s = settingsStore.use();
+  return (
+    <Layout preview={<GGStrip piecesId={s.ggPieces} boardId={s.ggBoard} cell={30} />}>
+      <Group title="Pieces">
+        {GG_PIECE_SETS.map((p) => (
+          <Option key={p.id} label={p.name} active={getGGPieces(s.ggPieces).id === p.id} onClick={() => set({ ggPieces: p.id })}>
+            <span className="flex gap-1">
+              <GGPieceView rank="G5" mine set={p} size={34} label={false} />
+              <GGPieceView mine={false} set={p} size={34} />
+            </span>
+          </Option>
+        ))}
+      </Group>
+      <Group title="Board">
+        {GG_BOARDS.map((b) => (
+          <Option key={b.id} label={b.name} active={getGGBoard(s.ggBoard).id === b.id} onClick={() => set({ ggBoard: b.id })}>
+            <span className="grid grid-cols-5 gap-px overflow-hidden rounded-md" style={{ background: b.line }}>
+              {Array.from({ length: 10 }, (_, i) => (
+                <span key={i} className="block size-5" style={{ background: (i + Math.floor(i / 5)) % 2 ? b.dark : b.light }} />
+              ))}
+            </span>
+          </Option>
+        ))}
+      </Group>
+    </Layout>
+  );
+}
+
 // ---------- all games (Settings → Look) ----------
 
-type LookGame = "tetris" | "snake" | "2048" | "mines" | "connect4";
+type LookGame = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals";
 
 export function GameLooks({ cell = 18 }: { cell?: number }) {
   const [game, setGame] = useState<LookGame>("tetris");
@@ -270,6 +360,8 @@ export function GameLooks({ cell = 18 }: { cell?: number }) {
             { value: "2048", label: "2048" },
             { value: "mines", label: "Mines" },
             { value: "connect4", label: "Connect 4" },
+            { value: "chess", label: "Chess" },
+            { value: "generals", label: "Generals" },
           ]}
         />
       </div>
@@ -278,6 +370,8 @@ export function GameLooks({ cell = 18 }: { cell?: number }) {
       {game === "2048" && <Look2048 />}
       {game === "mines" && <MinesLook />}
       {game === "connect4" && <C4Look />}
+      {game === "chess" && <ChessLook />}
+      {game === "generals" && <GeneralsLook />}
     </div>
   );
 }

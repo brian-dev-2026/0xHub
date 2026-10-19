@@ -209,6 +209,79 @@ export const C4_BOARDS: C4Board[] = [
   { id: "steel", name: "Steel", bg: ["#64748b", "#334155"], hole: "rgba(15,23,42,0.85)", glow: "rgba(148,163,184,0.4)" },
 ];
 
+// ---------- Chess ----------
+
+export interface ChessBoardTheme {
+  id: string;
+  name: string;
+  light: string;
+  dark: string;
+  /** Highlight for the last move and the selected square. */
+  highlight: string;
+  /** Coordinates text on light / dark squares. */
+  coordLight: string;
+  coordDark: string;
+}
+
+export const CHESS_BOARDS: ChessBoardTheme[] = [
+  { id: "wood", name: "Wood", light: "#f0d9b5", dark: "#b58863", highlight: "rgba(250,204,21,0.45)", coordLight: "#b58863", coordDark: "#f0d9b5" },
+  { id: "green", name: "Tournament", light: "#eeeed2", dark: "#769656", highlight: "rgba(246,246,105,0.55)", coordLight: "#769656", coordDark: "#eeeed2" },
+  { id: "blue", name: "Ice", light: "#dee3e6", dark: "#8ca2ad", highlight: "rgba(56,189,248,0.45)", coordLight: "#8ca2ad", coordDark: "#dee3e6" },
+  { id: "slate", name: "Slate", light: "#71717a", dark: "#3f3f46", highlight: "rgba(167,139,250,0.5)", coordLight: "#3f3f46", coordDark: "#a1a1aa" },
+  { id: "synthwave", name: "Synthwave", light: "#3b1450", dark: "#1a0526", highlight: "rgba(244,114,182,0.5)", coordLight: "#f472b6", coordDark: "#c084fc" },
+  { id: "marble", name: "Marble", light: "#f5f5f4", dark: "#a8a29e", highlight: "rgba(245,158,11,0.45)", coordLight: "#a8a29e", coordDark: "#f5f5f4" },
+];
+
+export interface ChessPieceSet {
+  id: string;
+  name: string;
+  /** Fill and outline for white and black pieces. */
+  white: { fill: string; stroke: string; detail: string };
+  black: { fill: string; stroke: string; detail: string };
+  /** Outlined, glowing pieces. */
+  neon?: boolean;
+}
+
+export const CHESS_PIECE_SETS: ChessPieceSet[] = [
+  { id: "classic", name: "Classic", white: { fill: "#ffffff", stroke: "#1c1917", detail: "#1c1917" }, black: { fill: "#262626", stroke: "#0a0a0a", detail: "#e7e5e4" } },
+  { id: "ivory", name: "Ivory & Ebony", white: { fill: "#fdf6e3", stroke: "#78350f", detail: "#78350f" }, black: { fill: "#3b2314", stroke: "#1c0f07", detail: "#d6b48a" } },
+  { id: "flat", name: "Flat", white: { fill: "#f8fafc", stroke: "#f8fafc", detail: "#94a3b8" }, black: { fill: "#1e293b", stroke: "#1e293b", detail: "#64748b" } },
+  { id: "neon", name: "Neon", white: { fill: "#22d3ee", stroke: "#22d3ee", detail: "#cffafe" }, black: { fill: "#f472b6", stroke: "#f472b6", detail: "#fce7f3" }, neon: true },
+  { id: "gold", name: "Gold & Silver", white: { fill: "#e5e7eb", stroke: "#4b5563", detail: "#4b5563" }, black: { fill: "#ca8a04", stroke: "#713f12", detail: "#fef3c7" } },
+];
+
+// ---------- Game of the Generals ----------
+
+export interface GGPieceSet {
+  id: string;
+  name: string;
+  /** Tile, outline and insignia colors for your army and the opponent's. */
+  mine: { tile: string; edge: string; mark: string };
+  theirs: { tile: string; edge: string; mark: string };
+}
+
+export const GG_PIECE_SETS: GGPieceSet[] = [
+  { id: "classic", name: "Classic", mine: { tile: "#f5f5f4", edge: "#a8a29e", mark: "#1c1917" }, theirs: { tile: "#27272a", edge: "#09090b", mark: "#e7e5e4" } },
+  { id: "army", name: "Field army", mine: { tile: "#4d7c0f", edge: "#365314", mark: "#fef08a" }, theirs: { tile: "#a16207", edge: "#713f12", mark: "#fef3c7" } },
+  { id: "navy", name: "Navy", mine: { tile: "#1e40af", edge: "#1e3a8a", mark: "#fde68a" }, theirs: { tile: "#991b1b", edge: "#7f1d1d", mark: "#fecaca" } },
+  { id: "neon", name: "Neon", mine: { tile: "#082f49", edge: "#22d3ee", mark: "#67e8f9" }, theirs: { tile: "#2e1065", edge: "#e879f9", mark: "#f5d0fe" } },
+];
+
+export interface GGBoardTheme {
+  id: string;
+  name: string;
+  light: string;
+  dark: string;
+  line: string;
+}
+
+export const GG_BOARDS: GGBoardTheme[] = [
+  { id: "field", name: "Field", light: "#3f6212", dark: "#365314", line: "rgba(0,0,0,0.35)" },
+  { id: "wood", name: "Wood", light: "#c8a26b", dark: "#b88f58", line: "rgba(60,30,10,0.45)" },
+  { id: "slate", name: "Slate", light: "#3f3f46", dark: "#33333a", line: "rgba(0,0,0,0.5)" },
+  { id: "sand", name: "Desert", light: "#d6b77a", dark: "#caa968", line: "rgba(90,60,20,0.4)" },
+];
+
 function pick<T extends { id: string }>(list: T[], id: string): T {
   return list.find((x) => x.id === id) ?? list[0];
 }
@@ -218,3 +291,7 @@ export const getTileSet = (id: string) => pick(TILE_SETS, id);
 export const getMinesTheme = (id: string) => pick(MINES_THEMES, id);
 export const getDiscSet = (id: string) => pick(DISC_SETS, id);
 export const getC4Board = (id: string) => pick(C4_BOARDS, id);
+export const getChessBoard = (id: string) => pick(CHESS_BOARDS, id);
+export const getChessPieces = (id: string) => pick(CHESS_PIECE_SETS, id);
+export const getGGPieces = (id: string) => pick(GG_PIECE_SETS, id);
+export const getGGBoard = (id: string) => pick(GG_BOARDS, id);

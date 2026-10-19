@@ -30,6 +30,8 @@ const MAX_MSGS_PER_SEC = 60;
  */
 export abstract class BaseRoom<S extends object> extends DurableObject<Env> {
   protected roomCode = "";
+  /** Query parameters of the connection being handled in onJoin (e.g. a chess time control). */
+  protected joinParams = new URLSearchParams();
   protected members: Member[] = [];
   protected abstract state: S;
   protected abstract readonly maxMembers: number;
@@ -144,6 +146,7 @@ export abstract class BaseRoom<S extends object> extends DurableObject<Env> {
       return new Response("Unauthorized", { status: 401 });
     }
     if (!this.roomCode) this.roomCode = request.headers.get("X-0xHub-Room") ?? "";
+    this.joinParams = new URL(request.url).searchParams;
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);

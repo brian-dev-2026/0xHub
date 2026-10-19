@@ -75,7 +75,7 @@ export default function Dashboard() {
           <StatTile label="Total KOs" value={fmtNum(stats.kos)} hint="opponents knocked out" accent="#f472b6" />
           <StatTile label="Lines cleared" value={fmtNum(stats.totalLines)} hint={`${fmtDuration(stats.playTimeMs)} played`} accent="#a3e635" />
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <MiniGameStat game="snake" href="/games/snake" label="Snake wins" value={me.games.snake.wins} hint={`best round ${me.games.snake.bestScore}`} />
           <MiniGameStat game="2048" href="/games/2048" label="2048 best" value={fmtNum(me.games["2048"].bestScore)} hint={`duel rating ${me.games["2048"].rating}`} />
           <MiniGameStat
@@ -86,6 +86,8 @@ export default function Dashboard() {
             hint="best Beginner time"
           />
           <MiniGameStat game="connect4" href="/games/connect4" label="Connect Four" value={me.games.connect4.rating} hint={`${me.games.connect4.wins}W · ${me.games.connect4.losses}L`} />
+          <MiniGameStat game="chess" href="/games/chess" label="Chess" value={me.games.chess.rating} hint={`${me.games.chess.wins}W · ${me.games.chess.losses}L · ${me.games.chess.draws}D`} />
+          <MiniGameStat game="generals" href="/games/generals" label="Generals" value={me.games.generals.rating} hint={`${me.games.generals.wins}W · ${me.games.generals.losses}L`} />
         </div>
       </section>
 

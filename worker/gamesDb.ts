@@ -1,4 +1,4 @@
-// D1 helpers for Snake Arena, 2048, Minesweeper Rush and Connect Four.
+// D1 helpers for Snake Arena, 2048, Minesweeper Rush, Connect Four, Chess and Game of the Generals.
 
 import type { GameId, GameSummaries, HistoryEntry, RatingEntry, ScoreEntry } from "../shared/protocol";
 import { DIFFICULTIES, type Difficulty } from "../shared/games/mines";
@@ -187,7 +187,10 @@ export async function gameSummaries(db: D1Database, userId: string): Promise<Gam
   const best = (g: string, m: string) => (bests.results.find((x) => x.game === g && x.mode === m)?.best as number | undefined) ?? null;
   const snake = r("snake") as Record<string, number>;
   const duel = r("2048") as Record<string, number>;
-  const c4 = r("connect4") as Record<string, number>;
+  const duelStats = (g: string) => {
+    const x = r(g) as Record<string, number>;
+    return { played: x.played ?? 0, wins: x.wins ?? 0, losses: x.losses ?? 0, draws: x.draws ?? 0, rating: x.rating ?? START };
+  };
   return {
     snake: { played: snake.played ?? 0, wins: snake.wins ?? 0, bestScore: best("snake", "arena") ?? 0 },
     "2048": {
@@ -203,17 +206,38 @@ export async function gameSummaries(db: D1Database, userId: string): Promise<Gam
       expert: best("mines", "expert"),
       won: (minesWon.results[0]?.n as number) ?? 0,
     },
-    connect4: {
-      played: c4.played ?? 0,
-      wins: c4.wins ?? 0,
-      losses: c4.losses ?? 0,
-      draws: c4.draws ?? 0,
-      rating: c4.rating ?? START,
-    },
+    connect4: duelStats("connect4"),
+    chess: duelStats("chess"),
+    generals: duelStats("generals"),
   };
 }
 
-const GAME_TITLE: Record<GameId, string> = { snake: "Snake Arena", "2048": "2048", mines: "Minesweeper Rush", connect4: "Connect Four" };
+const GAME_TITLE: Record<GameId, string> = {
+  snake: "Snake Arena",
+  "2048": "2048",
+  mines: "Minesweeper Rush",
+  connect4: "Connect Four",
+  chess: "Chess",
+  generals: "Game of the Generals",
+};
+/** How a chess / Generals game ended, for history lines. */
+const REASON_TEXT: Record<string, string> = {
+  checkmate: "checkmate",
+  resign: "resignation",
+  timeout: "time",
+  forfeit: "opponent left",
+  stalemate: "stalemate",
+  insufficient: "insufficient material",
+  threefold: "threefold repetition",
+  fivefold: "fivefold repetition",
+  fifty: "50-move rule",
+  seventyfive: "75-move rule",
+  agreement: "agreement",
+  "timeout-vs-insufficient": "time vs insufficient material",
+  "flag-captured": "flag captured",
+  "flag-reached": "flag reached the end",
+  "no-moves": "no moves left",
+};
 const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(ms < 100_000 ? 2 : 1)}s`;
 function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
@@ -225,7 +249,7 @@ export async function gameHistory(db: D1Database, userId: string, limit = 20): P
   const [matches, solos] = await db.batch<Record<string, unknown>>([
     db
       .prepare(
-        `SELECT m.game, m.created_at, m.duration_ms, p.place, p.score, p.rating_delta, p.data,
+        `SELECT m.game, m.reason, m.created_at, m.duration_ms, p.place, p.score, p.rating_delta, p.data,
            (SELECT GROUP_CONCAT(u.display_name, ', ') FROM game_match_players o JOIN users u ON u.id = o.user_id
             WHERE o.match_id = m.id AND o.user_id != p.user_id) AS opponents,
            (SELECT COUNT(*) FROM game_match_players o WHERE o.match_id = m.id AND o.place = p.place) AS tied
@@ -254,7 +278,9 @@ export async function gameHistory(db: D1Database, userId: string, limit = 20): P
       detail = `${m.score} pts · ${data.kills ?? 0} kills`;
     } else {
       label = `${GAME_TITLE[game]} · ${result === "win" ? "Won" : result === "lose" ? "Lost" : "Drew"}${opp ? ` vs ${opp}` : ""}`;
-      detail = game === "2048" ? `${m.score} pts` : `${(m.rating_delta as number) >= 0 ? "+" : ""}${m.rating_delta} rating`;
+      const delta = `${(m.rating_delta as number) >= 0 ? "+" : ""}${m.rating_delta} rating`;
+      const why = REASON_TEXT[m.reason as string];
+      detail = game === "2048" ? `${m.score} pts` : game === "chess" || game === "generals" ? `${why ? `by ${why} · ` : ""}${delta}` : delta;
     }
     out.push({ game, mode: "match", ts: m.created_at as number, durationMs: m.duration_ms as number, lines: 0, result, label, detail, ratingDelta: m.rating_delta as number });
   }

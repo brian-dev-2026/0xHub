@@ -148,6 +148,8 @@ export default function Profile() {
                 accent="#a1a1aa"
               />
               <StatTile label="Connect Four" value={games.connect4.rating} hint={`${games.connect4.wins}W-${games.connect4.losses}L-${games.connect4.draws}D`} accent="#f43f5e" />
+              <StatTile label="Chess" value={games.chess.rating} hint={`${games.chess.wins}W-${games.chess.losses}L-${games.chess.draws}D`} accent="#d6b48a" />
+              <StatTile label="Generals" value={games.generals.rating} hint={`${games.generals.wins}W-${games.generals.losses}L-${games.generals.draws}D`} accent="#65a30d" />
             </div>
           </section>
           <div className="grid grid-cols-2 gap-3">

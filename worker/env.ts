@@ -1,4 +1,6 @@
 import type { EndlessRun } from "./endless";
+import type { ChessRoom } from "./games/chessRoom";
+import type { GeneralsRoom } from "./games/generalsRoom";
 import type { Connect4Room } from "./games/connect4Room";
 import type { Duel2048Room } from "./games/duel2048Room";
 import type { SnakeRoom } from "./games/snakeRoom";
@@ -16,4 +18,6 @@ export interface Env {
   CONNECT4_ROOM: DurableObjectNamespace<Connect4Room>;
   MINES_RUN: DurableObjectNamespace<MinesRun>;
   RUN2048: DurableObjectNamespace<Run2048>;
+  CHESS_ROOM: DurableObjectNamespace<ChessRoom>;
+  GENERALS_ROOM: DurableObjectNamespace<GeneralsRoom>;
 }

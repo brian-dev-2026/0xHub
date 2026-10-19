@@ -139,7 +139,7 @@ export function useRoomSocket(path: string | null, onMessage: (m: Msg) => void, 
 }
 
 /** Quick-match queue for a game. Returns a room code (and whether it's an auto-start room). */
-export function useMatchmaking(game: string, onMatched: (room: string, auto: boolean) => void) {
+export function useMatchmaking(game: string, onMatched: (room: string, auto: boolean) => void, params = "") {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const [queue, setQueue] = useState(0);
@@ -162,7 +162,7 @@ export function useMatchmaking(game: string, onMatched: (room: string, auto: boo
     let retries = 0;
     const open = () => {
       let done = false;
-      const s = new WebSocket(wsUrl(`/api/ws/${game}/matchmake`));
+      const s = new WebSocket(wsUrl(`/api/ws/${game}/matchmake${params ? `?${params}` : ""}`));
       ws.current = s;
       s.onmessage = (e) => {
         const m = JSON.parse(e.data as string);

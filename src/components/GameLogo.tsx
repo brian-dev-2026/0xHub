@@ -111,6 +111,36 @@ export function GameLogo({ game, size = 48 }: { game: string; size?: number }) {
           }))}
         />
       );
+    case "chess":
+      return (
+        <Grid
+          cols={4}
+          rows={4}
+          size={size}
+          bg="#3f2a1d"
+          cells={Array.from({ length: 16 }, (_, i) => ({
+            x: i % 4,
+            y: Math.floor(i / 4),
+            color: (i % 4) + Math.floor(i / 4) === 3 ? "#facc15" : ((i % 4) + Math.floor(i / 4)) % 2 ? "#b58863" : "#f0d9b5",
+          }))}
+        />
+      );
+    case "generals":
+      return (
+        <Grid
+          cols={3}
+          rows={3}
+          size={size}
+          bg="#14261a"
+          cells={Array.from({ length: 9 }, (_, i) => ({
+            x: i % 3,
+            y: Math.floor(i / 3),
+            color: i < 3 ? "#e7e5e4" : i > 5 ? "#27272a" : "#3f6212",
+            label: i === 1 ? "★" : i === 7 ? "★" : undefined,
+            text: i === 1 ? "#ca8a04" : "#facc15",
+          }))}
+        />
+      );
     default:
       return <Grid cols={1} rows={1} size={size} cells={[]} />;
   }

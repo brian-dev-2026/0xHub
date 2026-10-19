@@ -65,6 +65,10 @@ export interface Settings {
   minesTheme: string;
   c4Discs: string;
   c4Board: string;
+  chessBoard: string;
+  chessPieces: string;
+  ggPieces: string;
+  ggBoard: string;
 }
 
 export const DEFAULT_KEYS: Record<Action, string[]> = {
@@ -94,6 +98,10 @@ export const DEFAULT_SETTINGS: Settings = {
   minesTheme: "modern",
   c4Discs: "classic",
   c4Board: "blue",
+  chessBoard: "wood",
+  chessPieces: "classic",
+  ggPieces: "classic",
+  ggBoard: "field",
 };
 
 export const settingsStore = createStore<Settings>(DEFAULT_SETTINGS);

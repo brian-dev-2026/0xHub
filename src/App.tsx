@@ -14,6 +14,8 @@ import Connect4Page from "./pages/games/Connect4";
 import Game2048Page from "./pages/games/Game2048";
 import MinesPage from "./pages/games/Mines";
 import SnakePage from "./pages/games/Snake";
+import ChessPage from "./pages/games/Chess";
+import GeneralsPage from "./pages/games/Generals";
 
 export default function App() {
   return (
@@ -41,6 +43,10 @@ export default function App() {
       <Route path="games/mines/:difficulty" element={<MinesPage />} />
       <Route path="games/connect4" element={<Connect4Page />} />
       <Route path="games/connect4/:code" element={<Connect4Page />} />
+      <Route path="games/chess" element={<ChessPage />} />
+      <Route path="games/chess/:code" element={<ChessPage />} />
+      <Route path="games/generals" element={<GeneralsPage />} />
+      <Route path="games/generals/:code" element={<GeneralsPage />} />
     </Routes>
     </AuthGate>
   );

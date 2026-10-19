@@ -50,8 +50,10 @@ export function ErrorPanel({ message, onBack }: { message: string; onBack: () =>
 }
 
 /** Quick match + private room + join-by-code, shared by the multiplayer games. */
-export function MatchLobby({ game, roomPath, quickLabel = "Quick match", quickHint, extra }: {
-  game: "snake" | "2048" | "connect4";
+export function MatchLobby({ game, roomPath, quickLabel = "Quick match", quickHint, extra, queueParams }: {
+  game: "snake" | "2048" | "connect4" | "chess" | "generals";
+  /** Extra query string for the matchmaking queue (e.g. a chess time control). */
+  queueParams?: string;
   roomPath: (code: string, auto?: boolean) => string;
   quickLabel?: string;
   quickHint: string;
@@ -59,7 +61,7 @@ export function MatchLobby({ game, roomPath, quickLabel = "Quick match", quickHi
 }) {
   const navigate = useNavigate();
   const [code, setCode] = useState("");
-  const mm = useMatchmaking(game, (room, auto) => navigate(roomPath(room, auto), { replace: true }));
+  const mm = useMatchmaking(game, (room, auto) => navigate(roomPath(room, auto), { replace: true }), queueParams);
 
   if (mm.searching) {
     return (

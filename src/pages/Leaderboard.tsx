@@ -7,7 +7,7 @@ import { Card, Empty, PageHeader, Segmented } from "../components/ui";
 import { useMe } from "../lib/auth";
 import { fmtNum, timeAgo } from "../lib/format";
 
-type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4";
+type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals";
 
 interface Column {
   label: string;
@@ -70,6 +70,14 @@ const BOARDS: Record<GameKey, { title: string; modes: { value: string; label: st
   },
   connect4: {
     title: "Connect Four",
+    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }],
+  },
+  chess: {
+    title: "Chess",
+    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }],
+  },
+  generals: {
+    title: "Game of the Generals",
     modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }],
   },
 };
