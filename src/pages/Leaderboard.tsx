@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
-import type { BattleEntry, EndlessEntry, RatingEntry, ScoreEntry } from "../../shared/protocol";
+import type { BattleEntry, CpuEntry, EndlessEntry, RatingEntry, ScoreEntry } from "../../shared/protocol";
+import { cpuLevelLabel, type CpuGame } from "../../shared/games/cpu";
 import { GameLogo } from "../components/GameLogo";
 import { Avatar, RankBadge } from "../components/marks";
 import { Card, Empty, PageHeader, Segmented } from "../components/ui";
 import { useMe } from "../lib/auth";
 import { fmtNum, timeAgo } from "../lib/format";
 
-type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals";
+type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals" | "pool";
 
 interface Column {
   label: string;
@@ -16,7 +17,18 @@ interface Column {
 }
 
 const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
-const record = (e: RatingEntry) => `${e.wins}-${e.losses}${e.draws ? `-${e.draws}` : ""}`;
+const record = (e: RatingEntry | CpuEntry) => `${e.wins}-${e.losses}${e.draws ? `-${e.draws}` : ""}`;
+
+/** Wins against the computer, scored by difficulty. */
+const vsComputer = (game: CpuGame) => ({
+  value: "computer",
+  label: "vs Computer",
+  columns: [
+    { label: "Points", value: (e: CpuEntry) => e.points, strong: true },
+    { label: "W-L-D", value: record },
+    { label: "Hardest win", value: (e: CpuEntry) => cpuLevelLabel(game, e.best) },
+  ],
+});
 
 const BOARDS: Record<GameKey, { title: string; modes: { value: string; label: string; columns: Column[] }[] }> = {
   tetris: {
@@ -74,15 +86,20 @@ const BOARDS: Record<GameKey, { title: string; modes: { value: string; label: st
   },
   chess: {
     title: "Chess",
-    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }],
+    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }, vsComputer("chess")],
   },
   generals: {
     title: "Game of the Generals",
-    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }],
+    modes: [{ value: "rating", label: "Rating", columns: [{ label: "Rating", value: (e: RatingEntry) => e.rating, strong: true }, { label: "W-L-D", value: record }] }, vsComputer("generals")],
+  },
+  pool: {
+    title: "8-Ball Pool",
+    modes: [vsComputer("pool")],
   },
 };
 
-const GAME_KEYS = Object.keys(BOARDS) as GameKey[];
+// Spelled out because Object.keys() would put the numeric-looking "2048" first.
+const GAME_KEYS: GameKey[] = ["tetris", "snake", "2048", "mines", "connect4", "chess", "generals", "pool"];
 
 export default function Leaderboard() {
   const profile = useMe().user;

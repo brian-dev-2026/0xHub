@@ -330,6 +330,7 @@ export async function deleteAccount(db: D1Database, id: string): Promise<void> {
     db.prepare(`DELETE FROM endless_runs WHERE user_id = ?`).bind(id),
     db.prepare(`DELETE FROM game_scores WHERE user_id = ?`).bind(id),
     db.prepare(`DELETE FROM game_ratings WHERE user_id = ?`).bind(id),
+    db.prepare(`DELETE FROM cpu_results WHERE user_id = ?`).bind(id),
     db
       .prepare(
         `UPDATE users SET username = NULL, password_hash = NULL, recovery_hash = NULL, is_guest = 1, display_name = 'Deleted player',
@@ -353,7 +354,8 @@ export async function cleanup(db: D1Database): Promise<void> {
          AND NOT EXISTS (SELECT 1 FROM endless_runs r WHERE r.user_id = users.id)
          AND NOT EXISTS (SELECT 1 FROM battles b WHERE b.player_a = users.id OR b.player_b = users.id)
          AND NOT EXISTS (SELECT 1 FROM game_match_players p WHERE p.user_id = users.id)
-         AND NOT EXISTS (SELECT 1 FROM game_scores g WHERE g.user_id = users.id)`,
+         AND NOT EXISTS (SELECT 1 FROM game_scores g WHERE g.user_id = users.id)
+         AND NOT EXISTS (SELECT 1 FROM cpu_results c WHERE c.user_id = users.id)`,
       )
       .bind(staleGuest),
   ]);

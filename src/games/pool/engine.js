@@ -276,7 +276,7 @@ const MARKUP = `<canvas id="c" tabindex="0" aria-label="Pool table"></canvas>
 </aside>`;
 
 /** Mounts the game into `host` and returns a function that tears it down. */
-export function mountPool(host, { onExit }) {
+export function mountPool(host, { onExit, onResult = () => {} }) {
   // Fonts declared inside a shadow root are ignored, so load them on the page
   if (!document.querySelector(`link[href="${FONT_HREF}"]`)) {
     const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: FONT_HREF });
@@ -1048,7 +1048,7 @@ export function mountPool(host, { onExit }) {
     if (practice) G.breaker = 0;
     const names = practice ? ['You'] : cpu ? ['You', 'Computer'] : [$('n0').value.trim() || 'Player 1', $('n1').value.trim() || 'Player 2'];
     G.players = names.map((name, i) => ({ name, bot: cpu && i === 1 }));
-    G.groups = [null, null]; G.cur = G.breaker; G.isBreak = true; G.bih = 'kitchen'; G.paused = false; G.shots = 0;
+    G.groups = [null, null]; G.cur = G.breaker; G.isBreak = true; G.bih = 'kitchen'; G.paused = false; G.shots = 0; G.startedAt = Date.now();
     G.phase = 'aim'; rackBalls(); aim = 0;
     $('menu').hidden = true; hud.hidden = false; $('over').hidden = true; $('pause').hidden = true;
     layout(); startTurn();
@@ -1103,6 +1103,8 @@ export function mountPool(host, { onExit }) {
   }
   function gameOver(winner, why) {
     G.phase = 'over'; renderCards(); renderPill();
+    // Only games against the computer go on the leaderboard (seat 0 is always the person)
+    if (G.mode === 'cpu' && G.game !== 'practice') onResult({ level: G.diff, result: winner === 0 ? 'win' : 'loss', durationMs: Date.now() - G.startedAt });
     const you = G.mode === 'cpu' || G.game === 'practice';
     $('overEyebrow').textContent = G.game === 'practice' ? 'Practice' : you ? (winner === 0 ? 'Victory' : 'Defeat') : 'Game over';
     $('overTitle').textContent = G.game === 'practice' ? 'Table cleared' : you ? (winner === 0 ? 'You win' : 'Computer wins') : `${pname(winner)} wins`;

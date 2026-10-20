@@ -14,6 +14,7 @@ import { GGPieceView } from "../../games/generals/Insignia";
 import { CustomizeSection, GeneralsLook } from "../../games/LookPickers";
 import { getGGPieces } from "../../games/looks";
 import { refreshMe, useMe } from "../../lib/auth";
+import { reportCpuResult } from "../../lib/cpuResults";
 import { useRoomSocket } from "../../lib/roomSocket";
 import { sfx } from "../../lib/sfx";
 import { settingsStore } from "../../lib/store";
@@ -62,7 +63,7 @@ function Home() {
               <span className="grid size-12 place-items-center rounded-xl bg-lime-500/20 text-lime-200 ring-1 ring-lime-400/30"><IconPlay width={20} height={20} /></span>
               <div>
                 <div className="text-lg font-bold">Play the computer</div>
-                <div className="text-sm text-zinc-400">Unrated practice. Set up your army and take on the computer.</div>
+                <div className="text-sm text-zinc-400">Set up your army and take on the computer. Wins count on the vs Computer leaderboard.</div>
               </div>
             </button>
           }
@@ -436,9 +437,19 @@ function VsComputer() {
   const [sel, setSel] = useState<number | null>(null);
   const [, redraw] = useState(0);
   const editor = useSetupEditor(ME, draft, setDraft, phase !== "setup");
+  // One leaderboard report per game.
+  const run = useRef({ id: "", start: 0, reported: false });
+
+  useEffect(() => {
+    const g = game.current, r = run.current;
+    if (phase !== "ended" || !g || r.reported) return;
+    r.reported = true;
+    reportCpuResult("generals", r.id, "standard", g.winner === null ? "draw" : g.winner === ME ? "win" : "loss", Date.now() - r.start);
+  }, [phase]);
 
   const start = () => {
     game.current = new GeneralsGame(draft, botSetup(BOT, rand), ME);
+    run.current = { id: crypto.randomUUID(), start: Date.now(), reported: false };
     memory.current = {};
     setLast(null);
     setPhase("playing");
@@ -554,7 +565,7 @@ function VsComputer() {
               Resign
             </button>
           )}
-          <div className="text-center text-xs text-zinc-500">Practice games aren't rated. Setup time: {GENERALS_SETUP_MS / 60_000} min online.</div>
+          <div className="text-center text-xs text-zinc-500">Wins count on the vs Computer leaderboard. Setup time: {GENERALS_SETUP_MS / 60_000} min online.</div>
         </div>
       </div>
     </GameShell>

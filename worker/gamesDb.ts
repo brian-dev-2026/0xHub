@@ -1,7 +1,8 @@
 // D1 helpers for Snake Arena, 2048, Minesweeper Rush, Connect Four, Chess and Game of the Generals.
 
-import type { GameId, GameSummaries, HistoryEntry, RatingEntry, ScoreEntry } from "../shared/protocol";
+import type { CpuEntry, GameId, GameSummaries, HistoryEntry, RatingEntry, ScoreEntry } from "../shared/protocol";
 import { DIFFICULTIES, type Difficulty } from "../shared/games/mines";
+import type { CpuGame, CpuResult } from "../shared/games/cpu";
 
 const ELO_K = 32;
 const START = 1000;
@@ -59,6 +60,44 @@ export async function topScores(db: D1Database, game: GameId, mode: string, limi
     score: r.score as number,
     durationMs: r.duration_ms as number,
     ts: r.created_at as number,
+  }));
+}
+
+/** Store a game against the computer. A repeated game id is ignored. */
+export async function recordCpuResult(db: D1Database, userId: string, r: CpuResult): Promise<void> {
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO cpu_results (user_id, game, game_id, level, result, points, duration_ms, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(userId, r.game, r.gameId, r.level, r.result, r.points, r.durationMs, Date.now())
+    .run();
+}
+
+/** "vs Computer" board: players with at least one win, by points (harder computers score more). */
+export async function topCpu(db: D1Database, game: CpuGame, limit = 50): Promise<CpuEntry[]> {
+  const { results } = await db
+    .prepare(
+      // Aliases are prefixed so they can't resolve to users.wins/losses/draws (Tetris Battle counters).
+      `SELECT c.user_id, u.display_name, u.avatar, u.color, SUM(c.points) AS cpu_points,
+              SUM(c.result = 'win') AS cpu_wins, SUM(c.result = 'loss') AS cpu_losses, SUM(c.result = 'draw') AS cpu_draws, MAX(c.points) AS cpu_best
+       FROM cpu_results c JOIN users u ON u.id = c.user_id
+       WHERE c.game = ?
+       GROUP BY c.user_id HAVING SUM(c.result = 'win') > 0
+       ORDER BY cpu_points DESC, cpu_wins DESC, cpu_losses ASC LIMIT ?`,
+    )
+    .bind(game, limit)
+    .all<Record<string, unknown>>();
+  return results.map((r) => ({
+    playerId: r.user_id as string,
+    name: r.display_name as string,
+    avatar: r.avatar as string,
+    color: r.color as string,
+    points: r.cpu_points as number,
+    wins: r.cpu_wins as number,
+    losses: r.cpu_losses as number,
+    draws: r.cpu_draws as number,
+    best: r.cpu_best as number,
   }));
 }
 

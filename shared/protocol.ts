@@ -232,6 +232,19 @@ export interface RatingEntry {
   draws: number;
 }
 
+/** A row of a "vs Computer" leaderboard. `best` is the points of the hardest win. */
+export interface CpuEntry {
+  playerId: string;
+  name: string;
+  avatar: string;
+  color: string;
+  points: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  best: number;
+}
+
 export interface GameSummaries {
   snake: { played: number; wins: number; bestScore: number };
   "2048": { bestScore: number; duelPlayed: number; duelWins: number; duelLosses: number; rating: number };

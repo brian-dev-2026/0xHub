@@ -12,6 +12,7 @@ import { Card, SectionTitle, Segmented, StatTile } from "../../components/ui";
 import { ChessBoard, useChessBoardSize } from "../../games/chess/Board";
 import { ChessLook, CustomizeSection } from "../../games/LookPickers";
 import { refreshMe, useMe } from "../../lib/auth";
+import { reportCpuResult } from "../../lib/cpuResults";
 import { useRoomSocket } from "../../lib/roomSocket";
 import { sfx } from "../../lib/sfx";
 
@@ -85,7 +86,7 @@ function Home() {
             <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/30"><IconPlay width={20} height={20} /></span>
             <div className="flex-1">
               <div className="text-lg font-bold">Play the computer</div>
-              <div className="text-sm text-zinc-400">Unrated practice, no clock.</div>
+              <div className="text-sm text-zinc-400">No clock. Wins count on the vs Computer leaderboard.</div>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -391,6 +392,15 @@ function VsComputer() {
   const [thinking, setThinking] = useState(false);
   const botName = BOT_LEVELS.find((b) => b.level === level)?.name ?? "Computer";
   const chess = game.current;
+  // One leaderboard report per game; a take-back makes the game not count.
+  const run = useRef({ id: crypto.randomUUID(), start: Date.now(), reported: false, tookBack: false });
+
+  useEffect(() => {
+    const r = run.current;
+    if (!over || r.reported || r.tookBack) return;
+    r.reported = true;
+    reportCpuResult("chess", r.id, String(level), over.winner === null ? "draw" : over.winner === mine ? "win" : "loss", Date.now() - r.start);
+  }, [over, level, mine]);
 
   const finishIfOver = () => {
     const o = chess.outcome();
@@ -426,6 +436,7 @@ function VsComputer() {
   };
   const undo = () => {
     // Take back your last move (and the computer's reply).
+    run.current.tookBack = true;
     chess.undo();
     if (chess.turn !== mine) chess.undo();
     setOver(null);
@@ -433,6 +444,7 @@ function VsComputer() {
   };
   const restart = () => {
     game.current = new Chess();
+    run.current = { id: crypto.randomUUID(), start: Date.now(), reported: false, tookBack: false };
     setOver(null);
     redraw((n) => n + 1);
   };
@@ -475,7 +487,9 @@ function VsComputer() {
               <button className="btn btn-ghost text-xs text-rose-300" disabled={!!over} onClick={() => setOver({ winner: mine === "w" ? "b" : "w", reason: "resign" as Outcome["reason"] })}>Resign</button>
             )}
           </div>
-          <div className="text-center text-xs text-zinc-500">Practice games aren't rated.</div>
+          <div className="text-center text-xs text-zinc-500">
+            {run.current.tookBack ? "You took back a move, so this game won't count on the leaderboard." : "Wins count on the vs Computer leaderboard. Taking back a move stops this game from counting."}
+          </div>
         </div>
       </div>
     </GameShell>

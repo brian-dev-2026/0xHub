@@ -39,7 +39,8 @@ import {
   type UserRow,
 } from "./db";
 import { sha256 } from "./auth";
-import { gameHistory, gameSummaries, topRatings, topScores } from "./gamesDb";
+import { gameHistory, gameSummaries, recordCpuResult, topCpu, topRatings, topScores } from "./gamesDb";
+import { parseCpuResult } from "../shared/games/cpu";
 import { isDifficulty } from "../shared/games/mines";
 import { chessTimeControl } from "../shared/games/clocks";
 import type { Env } from "./env";
@@ -365,13 +366,27 @@ async function route(request: Request, env: Env): Promise<Response> {
         return json(mode === "duel" ? await topRatings(env.DB, "2048", "rating") : await topScores(env.DB, "2048", "solo"));
       case "mines":
         return json(await topScores(env.DB, "mines", isDifficulty(mode) ? mode : "beginner"));
-      case "connect4":
       case "chess":
       case "generals":
+        return json(mode === "computer" ? await topCpu(env.DB, game) : await topRatings(env.DB, game, "rating"));
+      case "connect4":
         return json(await topRatings(env.DB, game, "rating"));
+      case "pool":
+        return json(await topCpu(env.DB, "pool"));
       default:
         return err("Unknown game", 404);
     }
+  }
+
+  // ---------- games against the computer (self-reported) ----------
+
+  if (pathname === "/api/cpu-results" && method === "POST") {
+    const u = await requireUser(request, env);
+    await limit(env, `cpu-result:${u.id}`, 120, HOUR);
+    const r = parseCpuResult(await body(request));
+    if (typeof r === "string") return err(r);
+    await recordCpuResult(env.DB, u.id, r);
+    return json({ ok: true });
   }
 
   // ---------- verified solo runs: Minesweeper, 2048 ----------
