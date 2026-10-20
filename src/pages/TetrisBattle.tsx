@@ -356,7 +356,7 @@ function ErrorBox({ message, onBack }: { message: string; onBack: () => void }) 
 
 function Shell({ children, onBack, compact }: { children: React.ReactNode; onBack?: () => void; compact?: boolean }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <div className="app-bg" />
       <header className={`flex items-center justify-between px-4 ${compact ? "py-3" : "py-4"}`}>
         {onBack ? (
@@ -374,7 +374,7 @@ function Shell({ children, onBack, compact }: { children: React.ReactNode; onBac
         </div>
         <div className="w-19" />
       </header>
-      <div className="flex flex-1 flex-col px-3 pb-6">{children}</div>
+      <div className="flex flex-1 flex-col justify-center px-3 pb-4">{children}</div>
     </div>
   );
 }

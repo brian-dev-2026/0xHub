@@ -22,7 +22,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
   if (status === "loading") {
     return (
-      <div className="grid min-h-screen place-items-center">
+      <div className="grid min-h-dvh place-items-center">
         <div className="app-bg" />
         <div className="flex flex-col items-center gap-4 text-zinc-400">
           <Logo />
@@ -33,7 +33,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
   if (status === "offline") {
     return (
-      <div className="grid min-h-screen place-items-center p-6 text-center">
+      <div className="grid min-h-dvh place-items-center p-6 text-center">
         <div className="app-bg" />
         <div className="flex flex-col items-center gap-4">
           <Logo />
@@ -205,9 +205,9 @@ function Welcome() {
   };
 
   return (
-    <div className="min-h-screen px-4 py-8">
+    <div className="min-h-dvh px-4 py-8">
       <div className="app-bg" />
-      <div className="mx-auto flex max-w-5xl flex-col gap-10 lg:min-h-[calc(100vh-4rem)] lg:flex-row lg:items-center lg:justify-between">
+      <div className="mx-auto flex max-w-5xl flex-col gap-10 lg:min-h-[calc(100dvh-4rem)] lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-lg animate-in">
           <Logo />
           <h1 className="mt-8 text-4xl font-bold tracking-tight sm:text-6xl">

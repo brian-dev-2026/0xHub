@@ -32,7 +32,7 @@ export { Avatar };
 export function Layout() {
   const profile = useMe().user;
   return (
-    <div className="min-h-screen">
+    <div className="min-h-dvh">
       <div className="app-bg" />
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r border-white/5 bg-ink-900/60 px-4 py-6 backdrop-blur-xl lg:flex">
@@ -73,7 +73,7 @@ export function Layout() {
         </Link>
       </header>
 
-      <main className="px-4 pt-6 pb-28 sm:px-6 lg:ml-64 lg:px-10 lg:pt-10 lg:pb-12">
+      <main className="px-4 pt-6 pb-21 sm:px-6 lg:ml-64 lg:px-10 lg:pt-10 lg:pb-12">
         <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>

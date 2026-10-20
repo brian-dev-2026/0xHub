@@ -24,6 +24,12 @@ body,
   min-height: 100%;
 }
 
+html,
+body {
+  /* No rubber-band bounce past the top/bottom edge on phones. */
+  overscroll-behavior-y: none;
+}
+
 body {
   margin: 0;
   background: var(--color-ink-950);

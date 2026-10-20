@@ -20,7 +20,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="grid min-h-screen place-items-center p-6 text-center">
+      <div className="grid min-h-dvh place-items-center p-6 text-center">
         <div className="app-bg" />
         <div className="glass max-w-md rounded-3xl p-8">
           <div className="flex justify-center"><GameLogo game="tetris" size={56} /></div>

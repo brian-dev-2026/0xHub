@@ -255,7 +255,7 @@ export default function TetrisEndless() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center">
+    <div className="flex min-h-dvh flex-col items-center">
       <div className="app-bg" />
       <header className="flex w-full max-w-5xl items-center justify-between px-4 py-4">
         <Link to="/games/tetris" className="btn btn-ghost px-3 py-2">

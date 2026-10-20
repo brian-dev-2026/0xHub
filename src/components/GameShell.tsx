@@ -14,7 +14,7 @@ export function GameShell({ title, kicker, back, onBack, right, children }: {
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <div className="app-bg" />
       <header className="flex items-center justify-between px-4 py-4">
         {onBack ? (
@@ -32,7 +32,7 @@ export function GameShell({ title, kicker, back, onBack, right, children }: {
         </div>
         <div className="flex w-19 justify-end">{right}</div>
       </header>
-      <div className="flex flex-1 flex-col px-3 pb-8">{children}</div>
+      <div className="flex flex-1 flex-col justify-center px-3 pb-4">{children}</div>
     </div>
   );
 }
