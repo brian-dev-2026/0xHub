@@ -75,4 +75,13 @@ export const GAMES: GameMeta[] = [
     modes: ["1v1", "vs computer"],
     gradient: "from-lime-700/40 via-green-800/30 to-stone-700/30",
   },
+  {
+    id: "pool",
+    title: "8-Ball Pool",
+    tagline: "Real-time 3D pool with spin, skins and a bot.",
+    href: "/games/pool",
+    status: "live",
+    modes: ["8-Ball", "9-Ball", "vs computer"],
+    gradient: "from-emerald-600/40 via-teal-700/30 to-amber-700/30",
+  },
 ];

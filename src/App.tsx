@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router";
 import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
@@ -16,6 +17,9 @@ import MinesPage from "./pages/games/Mines";
 import SnakePage from "./pages/games/Snake";
 import ChessPage from "./pages/games/Chess";
 import GeneralsPage from "./pages/games/Generals";
+
+// three.js is large, so pool loads only when someone opens it
+const PoolPage = lazy(() => import("./pages/games/Pool"));
 
 export default function App() {
   return (
@@ -47,6 +51,7 @@ export default function App() {
       <Route path="games/chess/:code" element={<ChessPage />} />
       <Route path="games/generals" element={<GeneralsPage />} />
       <Route path="games/generals/:code" element={<GeneralsPage />} />
+      <Route path="games/pool" element={<Suspense fallback={null}><PoolPage /></Suspense>} />
     </Routes>
     </AuthGate>
   );

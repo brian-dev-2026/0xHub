@@ -141,6 +141,23 @@ export function GameLogo({ game, size = 48 }: { game: string; size?: number }) {
           }))}
         />
       );
+    case "pool":
+      return (
+        <Grid
+          cols={3}
+          rows={3}
+          size={size}
+          bg="#14532d"
+          cells={[
+            { x: 1, y: 0, color: "#facc15", round: true },
+            { x: 0.5, y: 1, color: "#1d4ed8", round: true },
+            { x: 1.5, y: 1, color: "#dc2626", round: true },
+            { x: 0, y: 2, color: "#7c3aed", round: true },
+            { x: 1, y: 2, color: "#18181b", round: true, label: "8", text: "#fafafa" },
+            { x: 2, y: 2, color: "#ea580c", round: true },
+          ]}
+        />
+      );
     default:
       return <Grid cols={1} rows={1} size={size} cells={[]} />;
   }
