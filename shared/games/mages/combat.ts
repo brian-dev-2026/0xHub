@@ -1,7 +1,7 @@
 // Mage Siege combat: mage stats, damage, kills and basic attacks. Deterministic
 // (no Math.pow/sin/cos). Tasks 5-8 add passives, actives, traps and bosses on top.
 
-import { ACTIVE_CHARGE_SECS, ECON, ENEMIES, LEVEL, MAGES, TERRAIN_BOOST, TICK_HZ, secs } from "./data";
+import { ACTIVE_CHARGE_SECS, ECON, ENEMIES, LEVEL, MAGES, PASSIVES, TERRAIN_BOOST, TICK_HZ, secs } from "./data";
 import { pathPoint } from "./map";
 import type { Enemy, Mage, Sim, SimEvent } from "./sim";
 
@@ -47,6 +47,111 @@ export function killEnemy(sim: Sim, e: Enemy, by: Mage | null, ev: SimEvent[]): 
   sim.gold += gold;
   sim.kills++;
   ev.push({ type: "kill", enemy: e.id, by: by ? by.id : null, gold });
+  onDeath(sim, e, ev);
+}
+
+const dist = (ax: number, ay: number, bx: number, by: number): number => {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+/** Living enemies within `r` tiles of `from` (by path position), excluding `except`. */
+function near(sim: Sim, from: Enemy, r: number, except: ReadonlySet<Enemy> = new Set()): Enemy[] {
+  const fp = pathPoint(sim.map, from.d);
+  return sim.enemies.filter((o) => {
+    if (o === from || o.hp <= 0 || except.has(o)) return false;
+    const p = pathPoint(sim.map, o.d);
+    return dist(fp.x, fp.y, p.x, p.y) <= r;
+  });
+}
+
+/** The living enemy in `list` nearest to `from`; ties go to the earlier one in the list. */
+function nearest(sim: Sim, from: Enemy, list: Enemy[]): Enemy | null {
+  const fp = pathPoint(sim.map, from.d);
+  let best: Enemy | null = null;
+  let bestD = Infinity;
+  for (const o of list) {
+    const p = pathPoint(sim.map, o.d);
+    const d = dist(fp.x, fp.y, p.x, p.y);
+    if (d < bestD) {
+      bestD = d;
+      best = o;
+    }
+  }
+  return best;
+}
+
+/**
+ * Death-triggered passives, run from the single kill path after `e` has left the
+ * board (so nothing it triggers can hit it again): fire spread/explosion, venom jump.
+ */
+function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
+  const st = e.status;
+  if (st.burnT > 0 && st.burnLv >= PASSIVES.burnSpreadLevel) {
+    const owner = sim.mages.find((m) => m.kind === "fire" && m.level === st.burnLv)?.id ?? 0;
+    const spread = near(sim, e, PASSIVES.burnSpreadRadius);
+    for (const o of spread) {
+      o.status.burnDps = st.burnDps;
+      o.status.burnT = secs(PASSIVES.burnSecs);
+      o.status.burnLv = st.burnLv;
+      o.status.burnHit = st.burnHit;
+    }
+    if (spread.length > 0) ev.push({ type: "passive", mage: owner, kind: "burnSpread", targets: spread.map((o) => o.id) });
+    if (st.burnLv >= PASSIVES.explodeLevel) {
+      const hit = near(sim, e, PASSIVES.explodeRadius);
+      ev.push({ type: "passive", mage: owner, kind: "explode", targets: hit.map((o) => o.id) });
+      for (const o of hit) damage(sim, o, st.burnHit * PASSIVES.explodeDmg, null, ev);
+    }
+  }
+  if (st.poison.stacks > 0 && st.poison.t > 0 && st.poison.lv >= PASSIVES.venomJumpLevel) {
+    const best = nearest(sim, e, near(sim, e, PASSIVES.venomJumpRadius));
+    if (best !== null) {
+      const bp = best.status.poison;
+      bp.stacks = Math.min(MAGES.poison.passive[st.poison.lv - 1], bp.stacks + st.poison.stacks);
+      bp.dps = st.poison.dps;
+      bp.t = secs(PASSIVES.venomSecs);
+      bp.lv = st.poison.lv;
+      ev.push({ type: "passive", mage: 0, kind: "venomJump", targets: [best.id] });
+    }
+  }
+}
+
+/** Damage over time: ignores armor, still subject to shatter and shields. */
+function dot(sim: Sim, e: Enemy, amount: number, ev: SimEvent[]): void {
+  if (e.hp <= 0) return;
+  let dealt = amount;
+  if (sim.shatter && e.status.freezeT > 0) dealt *= 1.5;
+  if (e.status.shieldT > 0) dealt *= 0.5;
+  e.hp -= dealt;
+  if (e.hp <= 0) killEnemy(sim, e, null, ev);
+}
+
+/**
+ * Burn and venom damage, then timer countdown. A status applied on tick T with N
+ * ticks is active (movement, shatter) on ticks T..T+N-1 and deals N ticks of damage.
+ */
+export function statusTick(sim: Sim, ev: SimEvent[]): void {
+  sim.shatter = sim.mages.some((m) => m.kind === "ice" && m.level === 5);
+  for (const e of [...sim.enemies]) {
+    if (e.hp <= 0) continue;
+    const st = e.status;
+    if (st.burnT > 0) {
+      dot(sim, e, st.burnDps / TICK_HZ, ev);
+      if (--st.burnT === 0) {
+        st.burnDps = 0;
+        st.burnLv = 0;
+        st.burnHit = 0;
+      }
+    }
+    if (e.hp <= 0) continue;
+    if (st.poison.t > 0) {
+      dot(sim, e, (st.poison.stacks * st.poison.dps) / TICK_HZ, ev);
+      if (--st.poison.t === 0) st.poison = { stacks: 0, dps: 0, t: 0, lv: 0 };
+    }
+    if (st.slowT > 0 && --st.slowT === 0) st.slow = 0;
+    if (st.freezeT > 0) st.freezeT--;
+  }
 }
 
 /** Deals damage after armor (floor 1), shatter and shield; kills the enemy at 0 HP. */
@@ -58,12 +163,6 @@ export function damage(sim: Sim, e: Enemy, amount: number, by: Mage | null, ev: 
   e.hp -= dealt;
   if (e.hp <= 0) killEnemy(sim, e, by, ev);
 }
-
-const dist = (ax: number, ay: number, bx: number, by: number): number => {
-  const dx = ax - bx;
-  const dy = ay - by;
-  return Math.sqrt(dx * dx + dy * dy);
-};
 
 /** Charges meters, then each ready mage hits the frontmost enemy in range. */
 export function combatTick(sim: Sim, ev: SimEvent[]): void {
@@ -100,6 +199,87 @@ export function combatTick(sim: Sim, ev: SimEvent[]): void {
     damage(sim, target, hit(target), m, ev);
     for (const e of splashed) damage(sim, e, hit(e), m, ev);
     m.hits++;
+    passives(sim, m, target, hit(target), ev);
     m.cd = Math.round(TICK_HZ / s.aps);
+  }
+}
+
+/** On-hit passives of mage `m` after it hit `target` (m.hits already counts this hit). */
+function passives(sim: Sim, m: Mage, target: Enemy, hitDmg: number, ev: SimEvent[]): void {
+  const lv = m.level;
+  const alive = target.hp > 0;
+  const st = target.status;
+  const note = (kind: Extract<SimEvent, { type: "passive" }>["kind"], targets: Enemy[]): void => {
+    ev.push({ type: "passive", mage: m.id, kind, targets: targets.map((o) => o.id) });
+  };
+  switch (m.kind) {
+    case "fire":
+      if (!alive) return;
+      st.burnDps = hitDmg * (MAGES.fire.passive[lv - 1] / 100);
+      st.burnT = secs(PASSIVES.burnSecs);
+      st.burnLv = lv;
+      st.burnHit = hitDmg;
+      note("burn", [target]);
+      return;
+    case "ice":
+      if (!alive) return;
+      st.slow = MAGES.ice.passive[lv - 1] / 100;
+      st.slowT = secs(PASSIVES.slowSecs);
+      note("chill", [target]);
+      if (lv >= PASSIVES.freezeLevel && m.hits % PASSIVES.freezeEvery === 0) {
+        st.freezeT = secs(PASSIVES.freezeSecs);
+        note("freeze", [target]);
+      }
+      if (sim.shatter && st.freezeT > 0) note("shatter", [target]);
+      return;
+    case "lightning": {
+      if (lv < PASSIVES.chainAlwaysLevel && m.hits % PASSIVES.chainEvery !== 0) return;
+      const hit = new Set<Enemy>([target]);
+      const chained: Enemy[] = [];
+      let prev = target;
+      let dmg = hitDmg;
+      for (let i = 0; i < MAGES.lightning.passive[lv - 1]; i++) {
+        const next = nearest(sim, prev, near(sim, prev, PASSIVES.chainRadius, hit));
+        if (next === null) break;
+        dmg *= PASSIVES.chainFalloff;
+        hit.add(next);
+        chained.push(next);
+        damage(sim, next, dmg, m, ev);
+        prev = next;
+      }
+      if (chained.length > 0) note("chain", chained);
+      return;
+    }
+    case "earth":
+      if (alive) {
+        target.armor = Math.max(0, target.armor - MAGES.earth.passive[lv - 1]);
+        note("armorBreak", [target]);
+      }
+      if (lv >= PASSIVES.quakeLevel) {
+        const victims = near(sim, target, PASSIVES.quakeRadius);
+        note("quake", victims);
+        for (const o of victims) damage(sim, o, hitDmg * PASSIVES.quakeDmg, m, ev);
+      }
+      return;
+    case "poison": {
+      if (!alive) return;
+      const p = st.poison;
+      p.stacks = Math.min(MAGES.poison.passive[lv - 1], p.stacks + 1);
+      p.dps = PASSIVES.venomDpsPerLevel * lv;
+      p.t = secs(PASSIVES.venomSecs);
+      p.lv = lv;
+      note("venom", [target]);
+      return;
+    }
+    case "wind": {
+      // Always draw, so the RNG stream does not depend on who was hit.
+      const roll = sim.rng.next();
+      if (!alive || ENEMIES[target.kind].boss !== null) return;
+      if (roll < MAGES.wind.passive[lv - 1] / 100) {
+        target.d = Math.max(0, target.d - PASSIVES.knockback[lv - 1]);
+        note("gust", [target]);
+      }
+      return;
+    }
   }
 }

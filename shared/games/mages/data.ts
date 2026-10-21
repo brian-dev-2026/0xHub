@@ -123,6 +123,38 @@ export const ENEMIES: Record<EnemyId, EnemyDef> = {
   sapling: enemy(200, 0, 0, 0, false, null, 0),
 };
 
+/** Secondary passive numbers (seconds, tiles, fractions); per-level arrays are indexed by level - 1. */
+export const PASSIVES = {
+  /** Fire: burn lasts 3 s; from L3 it spreads on death (1 tile), at L5 the death also explodes (1 tile, 100% hit damage). */
+  burnSecs: 3,
+  burnSpreadLevel: 3,
+  burnSpreadRadius: 1,
+  explodeLevel: 5,
+  explodeRadius: 1,
+  explodeDmg: 1,
+  /** Ice: slow lasts 2 s; from L3 every 5th hit freezes for 1 s. */
+  slowSecs: 2,
+  freezeLevel: 3,
+  freezeEvery: 5,
+  freezeSecs: 1,
+  /** Lightning: every 3rd attack chains (every attack at L5), each jump 70% of the previous, within 1.5 tiles. */
+  chainEvery: 3,
+  chainAlwaysLevel: 5,
+  chainRadius: 1.5,
+  chainFalloff: 0.7,
+  /** Earth: L5 quake, 40% damage within 0.8 tiles. */
+  quakeLevel: 5,
+  quakeRadius: 0.8,
+  quakeDmg: 0.4,
+  /** Poison: each stack deals 4 x level dps for 4 s; at L5 stacks jump to the nearest enemy within 1.5 tiles on death. */
+  venomDpsPerLevel: 4,
+  venomSecs: 4,
+  venomJumpLevel: 5,
+  venomJumpRadius: 1.5,
+  /** Wind: knockback in tiles per level. */
+  knockback: [0.5, 0.5, 0.5, 0.5, 1],
+};
+
 export const TERRAIN_BOOST = {
   dmg: 0.3,
   hillRange: 0.25,

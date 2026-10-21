@@ -6,7 +6,7 @@ import {
   BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
-import { combatTick, killEnemy, magePrice } from "./combat";
+import { combatTick, killEnemy, magePrice, statusTick } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
 import { STAGE_WAVES, endlessWave, type Group } from "./waves";
@@ -40,7 +40,11 @@ export interface Status {
   freezeT: number;
   burnDps: number;
   burnT: number;
-  poison: { stacks: number; dps: number; t: number };
+  /** Level of the fire mage that set the burn, and the hit damage it was based on (for death spread/explosion). */
+  burnLv: number;
+  burnHit: number;
+  /** `dps` is per stack; `lv` is the level of the mage that last added a stack. */
+  poison: { stacks: number; dps: number; t: number; lv: number };
   shieldT: number;
   noHealT: number;
 }
@@ -105,6 +109,12 @@ export type SimEvent =
   | { type: "merge"; mage: number; level: number }
   | { type: "sell"; tile: number; refund: number }
   | { type: "kill"; enemy: number; by: number | null; gold: number }
+  | {
+      type: "passive";
+      mage: number;
+      kind: "burn" | "burnSpread" | "explode" | "chill" | "freeze" | "shatter" | "chain" | "armorBreak" | "quake" | "venom" | "venomJump" | "gust";
+      targets: number[];
+    }
   | { type: "waveStart"; wave: number }
   | { type: "waveEnd"; wave: number; bonus: number }
   | { type: "end"; won: boolean };
@@ -159,8 +169,8 @@ function hpScale(sim: Sim): number {
 }
 
 const freshStatus = (): Status => ({
-  slow: 0, slowT: 0, stunT: 0, freezeT: 0, burnDps: 0, burnT: 0,
-  poison: { stacks: 0, dps: 0, t: 0 }, shieldT: 0, noHealT: 0,
+  slow: 0, slowT: 0, stunT: 0, freezeT: 0, burnDps: 0, burnT: 0, burnLv: 0, burnHit: 0,
+  poison: { stacks: 0, dps: 0, t: 0, lv: 0 }, shieldT: 0, noHealT: 0,
 });
 
 function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
@@ -280,7 +290,10 @@ function terrainFactor(sim: Sim, e: Enemy): number {
 }
 
 function moveEnemies(sim: Sim): void {
-  for (const e of sim.enemies) e.d += (e.speed * terrainFactor(sim, e)) / TICK_HZ;
+  for (const e of sim.enemies) {
+    if (e.status.freezeT > 0) continue;
+    e.d += (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ;
+  }
 }
 
 /** Enemies past the exit cost lives and leave the board. */
@@ -314,7 +327,7 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
  *  1. apply this tick's actions (rejected and stale ones count in `rejected`)
  *  2. build break countdown; at 0 the next wave starts
  *  3. spawn due enemies
- *  4. (later tasks: mage combat, status effects, traps/hazards, boss abilities)
+ *  4. status ticks (burn, poison, timers), mage combat (later tasks: traps/hazards, boss abilities)
  *  5. reap enemies at 0 HP
  *  6. move enemies
  *  7. leaks
@@ -336,9 +349,11 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
 
   spawnDue(sim, ev);
 
+  // Status timers run before combat so a status applied on tick T is active for
+  // exactly secs(S) ticks (T..T+N-1) and burn/poison deal N ticks of damage (T+1..T+N).
+  statusTick(sim, ev);
   combatTick(sim, ev);
-  // Tasks 5-8 add here: mage actives, status ticks (burn, poison,
-  // slow, stun), trap and spell hazards, shaman/boss abilities.
+  // Tasks 6-8 add here: mage actives, stun, trap and spell hazards, shaman/boss abilities.
 
   reapDead(sim, ev);
   moveEnemies(sim);
