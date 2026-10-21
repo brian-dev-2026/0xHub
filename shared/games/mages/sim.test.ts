@@ -278,6 +278,21 @@ describe("mage siege waves", () => {
     expect(endlessWave(50, rng).some((g) => g.kind === "treant")).toBe(true);
     expect(endlessWave(60, rng).some((g) => g.kind === "goblinChief")).toBe(true);
     for (const w of [1, 9, 11, 49]) expect(endlessWave(w, rng).every((g) => ENEMIES[g.kind].boss === null)).toBe(true);
+    // Exactly one boss per boss wave, however many cycles have passed.
+    for (const w of [10, 60, 150, 300])
+      expect(endlessWave(w, rng).filter((g) => ENEMIES[g.kind].boss !== null).reduce((n, g) => n + g.count, 0)).toBe(1);
+  });
+
+  it("__noLeak keeps lives and a leaked Treant's saplings wither", () => {
+    const sim = createSim(cfg({ mode: "endless", __noLeak: true }));
+    sim.phase = "wave";
+    const treant = spawnForTest(sim, "treant", pathLength(sim.map) - 0.01);
+    const sap = spawnForTest(sim, "sapling", 3);
+    sap.owner = treant.id;
+    const ev = step(sim, []);
+    expect(sim.lives).toBe(20);
+    expect(sim.enemies).toHaveLength(0);
+    expect(ev).toContainEqual({ type: "despawn", enemy: sap.id });
   });
 
   it("endless mix widens with the wave", () => {

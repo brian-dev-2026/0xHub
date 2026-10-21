@@ -21,6 +21,8 @@ export interface SimConfig {
   team: MageId[];
   traps: TrapId[];
   spells: SpellId[];
+  /** Test only: leaks cost no lives (for measuring long replays). verifyRun rejects any config that sets it. */
+  __noLeak?: boolean;
 }
 
 /** A player input, applied on tick `t`. `place` buys and places in one action. */
@@ -359,11 +361,19 @@ function moveEnemies(sim: Sim): void {
 /** Enemies past the exit cost lives and leave the board. */
 function leak(sim: Sim, ev: SimEvent[]): void {
   const end = pathLength(sim.map);
+  let treantLeaked = false;
   sim.enemies = sim.enemies.filter((e) => {
     if (e.d < end) return true;
-    const lost = Math.min(sim.lives, ENEMIES[e.kind].leak);
+    const lost = sim.cfg.__noLeak ? 0 : Math.min(sim.lives, ENEMIES[e.kind].leak);
     sim.lives -= lost;
+    if (e.kind === "treant") treantLeaked = true;
     ev.push({ type: "leak", enemy: e.id, lives: lost });
+    return false;
+  });
+  // A leaked Treant's saplings wither with it (only reachable with __noLeak, since its leak otherwise ends the run).
+  if (treantLeaked) sim.enemies = sim.enemies.filter((e) => {
+    if (e.owner === undefined || sim.enemies.some((o) => o.id === e.owner)) return true;
+    ev.push({ type: "despawn", enemy: e.id });
     return false;
   });
 }

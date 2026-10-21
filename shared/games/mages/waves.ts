@@ -94,10 +94,7 @@ export function endlessWave(wave: number, rng: Rng): Group[] {
   const every = Math.max(0.4, 1.2 - wave * 0.01);
   const groups: Group[] = [];
   for (let i = 0; i < groupCount; i++) groups.push(g(rng.pick(pool), count, every, i * 4));
-  if (wave % 10 === 0) {
-    const n = wave / 10 - 1;
-    // One more boss each time the cycle comes around.
-    groups.push(g(ENDLESS_BOSSES[n % ENDLESS_BOSSES.length], 1 + Math.floor(n / ENDLESS_BOSSES.length), 3, 6));
-  }
+  // Exactly one boss per boss wave; later cycles are harder through the HP scaling alone.
+  if (wave % 10 === 0) groups.push(g(ENDLESS_BOSSES[(wave / 10 - 1) % ENDLESS_BOSSES.length], 1, 3, 6));
   return groups;
 }
