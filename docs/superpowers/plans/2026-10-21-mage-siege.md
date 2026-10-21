@@ -47,8 +47,9 @@
 | `shared/games/mages/replay.ts` | Headless replay, state hash, `verifyRun` |
 | `shared/games/mages/progress.ts` | Progress shape, start checks, applying results |
 | `shared/games/mages/*.test.ts` | Tests per module |
-| `migrations/0007_mages.sql` | `mage_progress`, `mage_runs` |
-| `worker/mages.ts` | D1 glue for start, finish, progress |
+| `migrations/0007_mages.sql` | `mage_progress` |
+| `shared/games/mages/chunk.ts` | Sim snapshot/restore, action validation, per-wave advance (Task 9b) |
+| `worker/mages.ts` | Progress in D1 and the `MageRun` Durable Object (per-wave verification) |
 | `src/games/mages/engine.js` + `engine.d.ts` | Mount, loop, wiring |
 | `src/games/mages/scene.js` | Renderer, camera, lights, quality, sideways layout |
 | `src/games/mages/terrain.js` | Heightfield, water, lava, props, procedural textures |
@@ -303,25 +304,54 @@ Per spec: Shaman heals enemies within 1.5 tiles for 8% max HP every 3 s (blocked
 - [ ] **Step 5: Measure replay cost.** Add a test `endless replay cost` that replays a scripted 100-wave Endless run (a strong script, or a test-only god mode enabled by `cfg` flag `__noLeak` that is rejected by `verifyRun`) and logs elapsed ms. Run it and record the number in the commit message. Decision rule: if 300 waves extrapolate to under 500 ms on this machine, keep single-request verification. Otherwise, split finish into chunked verification: the client sends actions per 25 waves and `mage_runs` stores a checkpoint hash and serialized sim state. Add that as an extra task before Task 10 and tell the user.
 - [ ] **Step 6: Commit** `"Mage Siege: replay verification and progress rules (endless 100-wave replay: N ms)"`.
 
-### Task 10: Server: tables, API, leaderboard
+### Task 9b: Faster sim and incremental verification (added by ruling R26)
+
+Task 9 measured a 100-wave Endless replay at 7.2–8.3 s (300 waves ≈ 25–31 s) and a stage-1 verify at ≈76 ms, so whole-run verification in one request is ruled out. This task makes the sim faster and lets the server verify a run wave by wave while it is played, following the existing Tetris `EndlessRun` Durable Object (`worker/endless.ts`: `init`, `input` with `upTo`, wall-clock check, hash compare, `serialize`/`deserialize`, abandon alarm).
 
 **Files:**
-- Create: `migrations/0007_mages.sql`, `worker/mages.ts`
-- Modify: `worker/index.ts` (routes, near the other verified solo runs at ~line 394, and the `/api/leaderboard` switch at ~line 357), `worker/db.ts:344-362` (`cleanup`), `shared/protocol.ts:210-211` (`GameId`, `GAME_IDS`), `worker/gamesDb.ts` only if `GameId` needs it
+- Modify: `shared/games/mages/sim.ts`, `combat.ts`, `actives.ts`, `hazards.ts`, `bosses.ts` (performance only), `rng.ts` (restore from state), `replay.ts`
+- Create: `shared/games/mages/chunk.ts`
+- Test: `shared/games/mages/chunk.test.ts`, existing replay tests
 
 **Interfaces:**
-- Consumes: `verifyRun`, `checkStart`, `applyOutcome`, `unlocked`, `recordScore(db, userId, "mages", "endless", score, durationMs, data)`, `topScores(db, "mages", "endless")`, `requireUser`, `body`, `limit`, `json`, `err` from `worker/index.ts`.
+- Consumes: Task 9 `verifyRun` validation, `hashSim`, `Outcome`, `replay`.
 - Produces:
-  - SQL: `CREATE TABLE mage_progress (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at INTEGER NOT NULL)`; `CREATE TABLE mage_runs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL, stage INTEGER NOT NULL, team TEXT NOT NULL, seed INTEGER NOT NULL, created_at INTEGER NOT NULL, finished_at INTEGER)` plus index `mage_runs_user (user_id, created_at)`.
-  - `worker/mages.ts`: `getProgress(db, userId): Promise<Progress>`, `startRun(db, userId, mode, stage, team): Promise<{ runId: string; seed: number; cfg: SimConfig } | string>`, `finishRun(db, userId, runId, actions): Promise<{ outcome: Outcome; progress: Progress; best?: number; rank?: number } | string>`.
-  - Routes: `GET /api/mages/progress` → `{ progress, unlocked }`; `POST /api/mages/start {mode, stage, team}` → `{ runId, seed, cfg }` (rate limit `run-start:${id}`, 300/hour); `POST /api/mages/finish {runId, actions}` → `{ outcome, progress, best?, rank? }` (body limit 2,000,000 bytes; rejects unknown, foreign or already finished runs; sets `finished_at` before recording so a replayed request can't double-record). `/api/leaderboard?game=mages&mode=endless` → `topScores`.
-  - The seed comes from `crypto.getRandomValues(new Uint32Array(1))[0]`. `cfg.traps` and `cfg.spells` are the player's unlocked lists at start time.
+  - `restoreRng(state: number): Rng` (resumes from `rng.state()`).
+  - `serializeSim(sim: Sim): SimSnapshot` (plain JSON, RNG states as numbers, no functions) and `restoreSim(snap: SimSnapshot): Sim`, such that `hashSim(restoreSim(serializeSim(s))) === hashSim(s)` and stepping both gives identical hashes from then on.
+  - `validateActions(raw: unknown, fromTick: number, upTo: number, max: number): Action[] | string` (Task 9's validation, now shared by `verifyRun`).
+  - `advance(sim: Sim, actions: Action[], upTo: number): { ok: true } | { ok: false; error: string }`: steps from `sim.tick` to `upTo` (exclusive), feeding each tick its actions. Any sim rejection fails. `upTo` may not exceed the tick at which the current wave (or build phase) began plus `secs(150)` (one chunk is at most one wave plus its break), nor run past the end of the game.
+  - `outcomeOf(sim: Sim): Outcome` (shared by `replay` and the server).
 
-- [ ] **Step 1: Write the migration and `worker/mages.ts`;** add the routes and the leaderboard case; add `"mages"` to `GameId` and `GAME_IDS`.
-- [ ] **Step 2: Cleanup:** in `worker/db.ts:cleanup`, add `AND NOT EXISTS (SELECT 1 FROM mage_progress m WHERE m.user_id = users.id)` to the guest delete (Review Focus 4), and a statement `DELETE FROM mage_runs WHERE finished_at IS NULL AND created_at < ?` bound to `now - 24h`.
-- [ ] **Step 3: Verify types and existing tests:** `npm run typecheck && npm test`. Expected: no errors, all tests pass.
-- [ ] **Step 4: Verify the API locally:** run `npm run dev` (applies migrations), then with a guest cookie: `POST /api/mages/start` with stage 3 returns 400 "locked"; stage 1 with team `["fire","ice","lightning"]` returns a seed; `POST /api/mages/finish` with the Task 9 scripted winning actions, regenerated for that seed through a small Node script calling `replay`, returns `outcome.won === true` and `progress.cleared[1] === 3`; sending the same finish again returns 400; `GET /api/mages/progress` shows stage 2 unlocked.
-- [ ] **Step 5: Commit** `"Mage Siege: progress and verified runs on the server"`.
+**Performance:** profile the 100-wave cost test. Remove per-tick allocations in hot paths (array `filter`/`map` copies in targeting, status, zone and hazard loops; repeated `pathPoint` for the same enemy within a tick, which can be cached per tick). Behaviour must not change: pin `hashSim` after every `waveEnd` for the Task 9 scripted stage-1 run and the first 30 waves of the cost run BEFORE optimising, and assert the same sequence after. Target: at least 3× faster on the 100-wave test. Report before and after numbers.
+
+- [ ] **Step 1: Write failing tests** in `chunk.test.ts`: `serialize round-trip keeps the hash and the future`; `advance in per-wave chunks equals one replay` (scripted stage-1 run fed chunk by chunk with serialize → JSON → restore between chunks; the final `outcomeOf` deep-equals `replay(...).outcome`); `advance rejects upTo past one wave plus 150 s`; `advance rejects stale or out-of-range actions`; `per-wave hash sequence is pinned` (recorded before optimising).
+- [ ] **Step 2: Run** `npx vitest run shared/games/mages/chunk.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** RNG restore, serialize/restore, `validateActions`, `advance` and `outcomeOf`; refactor `replay`/`verifyRun` onto them.
+- [ ] **Step 4: Optimise**; re-run the pinned-hash and cost tests; record the numbers.
+- [ ] **Step 5: Run** `npx vitest run shared/games/mages && npm run typecheck`. Expected: PASS.
+- [ ] **Step 6: Commit** `"Mage Siege: faster sim and per-wave verification chunks (100-wave: A ms → B ms)"`.
+
+### Task 10: Server: progress table, MageRun Durable Object, API, leaderboard (revised by ruling R26)
+
+**Files:**
+- Create: `migrations/0007_mages.sql`, `worker/mages.ts` (progress helpers + the `MageRun` Durable Object)
+- Modify: `worker/index.ts` (routes near the other verified runs, ~line 338–430, and the `/api/leaderboard` switch ~line 357; export `MageRun`), `wrangler.jsonc` (binding `MAGE_RUN`, class `MageRun`, migration tag `v5` with `new_sqlite_classes: ["MageRun"]`), `worker/env.ts` (binding type), `worker/db.ts:344-362` (`cleanup`), `shared/protocol.ts:210-211` (`GameId`, `GAME_IDS`)
+
+**Interfaces:**
+- Consumes: `checkStart`, `applyOutcome`, `unlocked`, `createSim`, `serializeSim`/`restoreSim`, `validateActions`, `advance`, `outcomeOf`, `hashSim`, `recordScore(db, userId, "mages", "endless", score, durationMs, data)`, `topScores(db, "mages", "endless")`, `requireUser`, `body`, `limit`, `json`, `err`, `clearStorage`; pattern: `worker/endless.ts`.
+- Produces:
+  - SQL: `CREATE TABLE mage_progress (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL, updated_at INTEGER NOT NULL)`.
+  - `getProgress(db, userId): Promise<Progress>`, `saveProgress(db, userId, p): Promise<void>`.
+  - `class MageRun extends DurableObject<Env>` with `init(userId, cfg: SimConfig): Promise<{ seed: number }>` (server-chosen seed; stores the serialized sim) and `input(userId, batch: { upTo: number; actions: unknown; h: number; final?: boolean }): Promise<MageChunkResult>`.
+  - `input` behaviour: load and restore; check owner, done and invalid; reject `upTo` ahead of real time (the game may run at 2× speed, so allow `upTo / TICK_HZ * 1000 <= 2 * (now - createdAt) + 3000`); `validateActions` then `advance`; compare `batch.h` with `hashSim` (mismatch marks the run invalid); save. When the sim is won or lost (or `final` on an Endless run), record: stage runs go through `applyOutcome` + `saveProgress`; Endless runs go through `recordScore` and update `endlessBest`; then clear storage and return `{ ok, finished: true, outcome, progress, best?, rank? }`. Abandon alarm 1 h, like EndlessRun.
+  - Routes: `GET /api/mages/progress` → `{ progress, unlocked }`; `POST /api/mages/start {mode, stage, team}` → `{ runId, seed, cfg }` (checkStart against stored progress; rate limit `run-start:${id}`, 300/hour); `POST /api/mages/runs/:id/input` (body limit 2,000,000) → `MageRun.input`. `/api/leaderboard?game=mages&mode=endless` → `topScores`.
+  - Client contract (used by Task 14): post one `input` per completed wave (`upTo` = the tick right after that wave's `waveEnd`), and a final one when the run ends (won/lost, or quitting Endless).
+
+- [ ] **Step 1: Write the migration, `worker/mages.ts`, the binding and migration in `wrangler.jsonc`, the routes and the leaderboard case;** add `"mages"` to `GameId`/`GAME_IDS`.
+- [ ] **Step 2: Cleanup:** in `worker/db.ts:cleanup`, add `AND NOT EXISTS (SELECT 1 FROM mage_progress m WHERE m.user_id = users.id)` to the guest delete (Review Focus 4). Abandoned runs expire through the DO alarm.
+- [ ] **Step 3: Verify:** `npm run typecheck && npm test`. Expected: pass.
+- [ ] **Step 4: Verify the API locally:** `npm run dev`; as a guest: start stage 3 → 400 locked; start stage 1 with `["fire","ice","lightning"]` → seed; drive the Task 9 scripted stage-1 player for that seed in a small Node script, posting one `input` per wave → the final response has `finished: true`, `outcome.won` and `progress.cleared[1] === 3`; a tampered batch (wrong `h`) → 400 and the run is dead; `GET /api/mages/progress` shows stage 2 unlocked.
+- [ ] **Step 5: Commit** `"Mage Siege: progress and wave-by-wave verified runs on the server"`.
 
 ### Task 11: 3D scene, terrain and quality settings
 
@@ -332,7 +362,7 @@ Per spec: Shaman heals enemies within 1.5 tiles for 8% max HP every 3 s (blocked
 **Interfaces:**
 - Consumes: `generateMap`, `pathPoint`, `GameMap`.
 - Produces:
-  - `engine.d.ts`: `export function mountMages(host: HTMLElement, opts: { onExit: () => void; api: MagesApi }): () => void` with `MagesApi = { progress(): Promise<unknown>; start(body: unknown): Promise<unknown>; finish(body: unknown): Promise<unknown> }`.
+  - `engine.d.ts`: `export function mountMages(host: HTMLElement, opts: { onExit: () => void; api: MagesApi }): () => void` with `MagesApi = { progress(): Promise<unknown>; start(body: unknown): Promise<unknown>; input(runId: string, batch: unknown): Promise<unknown> }`.
   - `scene.js`: `createScene(canvas, rootEl, quality) → { renderer, scene, camera, layout(hudRects), toWorld(tileIndex) → THREE.Vector3, tileAt(clientX, clientY) → number | -1, loc(e), setQuality(q), render(), dispose() }`. Camera tilted ~55°, framing the 16 × 9 board between HUD rects; sideways mode for upright touch screens (copy Pool's `rot`/`loc`/`box` approach, including the swapped `--sa-*` safe-area variables).
   - `terrain.js`: `buildTerrain(scene, map, quality) → { group, update(dt), dispose() }`: a heightfield (hills raised, path sunken 0.04, water basin), PBR materials from procedural canvas textures (grass, dirt, stone, sand, moss) memoized like Pool's `memo`; water shader with ripple and environment reflection (High only); lava with pulsing emissive; props from `map.props` (lathe and extrude trees, rocks, pillars, crystals, wells, reeds); tile hover/boost highlight overlay `setHighlight(tiles: number[], color)`.
   - Quality: `"high"|"medium"|"low"` stored as `0xhubms.quality`; auto-picked on first run (low if `devicePixelRatio × screen area` is small or `navigator.hardwareConcurrency <= 4` on a touch device). Low: no shadows, no water reflection, pixel ratio 1, particle budgets halved (exposed as `quality.particles` 1 / 0.75 / 0.5).
@@ -390,9 +420,9 @@ Effects per spec, each growing with level (more particles, bigger radius, bright
   - `input.js`: `createInput(scene, handlers)` emitting `tap(tile)`, `dragStart(tile)`, `dragMove(tile)`, `dragEnd(fromTile, toTile)` from pointer events in both normal and sideways mode.
   - `ui.js`: the screens (world map with stars and Endless lock, team select, HUD, shop tabs Mages | Traps | Spells, pause with quality and quit, results), the boss health bar, mage info on tap (level, passive and active text, Sell button), and storage helpers `savePendingRun(run)`, `loadPendingRun()`, `clearPendingRun()` under `0xhubms.pending` (try/catch around storage).
 
-Interaction rules: tapping a shop mage enters place mode and highlights boost tiles for that mage (terrain `setHighlight`); tapping a valid tile queues `place`; tapping elsewhere cancels. Dragging a mage queues `merge` when dropped on the same kind and level, `move` when dropped on an empty buildable tile, and otherwise snaps back (Review Focus 1). Tapping a charged mage casts an instant active; for a targeted active it enters target mode (path tiles glow) and the next path tap queues `cast`. Traps: tap the trap, then a path tile. Spells: tap; Meteor needs a target tap. A 1×/2× speed toggle and Pause are top right. When the run ends, `savePendingRun({ runId, actions })` and then `api.finish`; on success, `clearPendingRun()` and show the results with stars and new unlocks; on failure, show "Couldn't save your result" with Retry (Review Focus 3). On mount, a leftover pending run is retried first.
+Interaction rules: tapping a shop mage enters place mode and highlights boost tiles for that mage (terrain `setHighlight`); tapping a valid tile queues `place`; tapping elsewhere cancels. Dragging a mage queues `merge` when dropped on the same kind and level, `move` when dropped on an empty buildable tile, and otherwise snaps back (Review Focus 1). Tapping a charged mage casts an instant active; for a targeted active it enters target mode (path tiles glow) and the next path tap queues `cast`. Traps: tap the trap, then a path tile. Spells: tap; Meteor needs a target tap. A 1×/2× speed toggle and Pause are top right. Submission follows Task 10's client contract: after each `waveEnd`, post that wave's batch with `api.input(runId, { upTo, actions, h: hashSim(sim) })` in the background; when the run ends, post the final batch (`final: true`). Unsent batches are queued with `savePendingRun({ runId, batches })` and retried in order; the result screen waits for the final response (stars, new unlocks, Endless rank). On failure show "Couldn't save your result" with Retry (Review Focus 3). On mount, a leftover pending run is retried first. A server rejection (`ok: false`) shows "This run couldn't be verified" and returns to the world map.
 
-- [ ] **Step 1: Write the failing tests** in `ui.test.ts`: `pending run round-trips through storage` (with a stubbed `localStorage`), `clearPendingRun removes it`, `storage errors are swallowed` (a stub that throws on `setItem` makes `savePendingRun` not throw and `loadPendingRun` return null).
+- [ ] **Step 1: Write the failing tests** in `ui.test.ts`: `pending batches round-trip through storage in order` (with a stubbed `localStorage`), `clearPendingRun removes it`, `storage errors are swallowed` (a stub that throws on `setItem` makes `savePendingRun` not throw and `loadPendingRun` return null).
 - [ ] **Step 2: Run** `npx vitest run src/games/mages/ui.test.ts`. Expected: FAIL.
 - [ ] **Step 3: Implement** `input.js` and `ui.js`, and wire the full flow in `engine.js` (world map → team → `api.start` → map from seed → play → finish).
 - [ ] **Step 4: Run** `npx vitest run src/games/mages/ui.test.ts && npm run typecheck`. Expected: PASS.
