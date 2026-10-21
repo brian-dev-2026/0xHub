@@ -1,6 +1,7 @@
 // Mage Siege renderer shell: WebGL renderer, sky-lit scene, tilted camera framing the 16 × 9 board between the
 // HUD, the sideways mapping for upright touch screens (Pool's rot/loc/box) and the quality presets.
 import * as THREE from 'three';
+import { H as BOARD_H, W as BOARD_W } from '../../../shared/games/mages/data';
 
 // ================= Quality =================
 /** particles: share of each effect's particle budget; texSize: terrain texture width; segs: terrain vertices per tile;
@@ -30,7 +31,6 @@ export function saveQuality(name) {
 }
 
 // ================= Scene =================
-export const BOARD_W = 16, BOARD_H = 9;
 const TILT = THREE.MathUtils.degToRad(55);
 const FOV = 34;
 const SKY = new THREE.Color(0xaebfcc); // fog and background: hazy afternoon sky
@@ -64,7 +64,7 @@ export function createScene(canvas, rootEl, quality) {
   sun.position.copy(SUN_DIR).multiplyScalar(30);
   const sc = sun.shadow.camera;
   sc.left = -15; sc.right = 15; sc.top = 12; sc.bottom = -12; sc.near = 5; sc.far = 70;
-  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.025; sun.shadow.radius = 3;
+  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.025;
   scene.add(sun, sun.target);
   const hemi = new THREE.HemisphereLight(0xcfe2ff, 0x5a4a32, 0.35);
   scene.add(hemi);
@@ -138,6 +138,8 @@ export function createScene(canvas, rootEl, quality) {
       ? { width: vw + 'px', height: vh + 'px', transform: `translateX(${window.innerWidth}px) rotate(90deg)` }
       : { width: '', height: '', transform: '' });
     rootEl.classList.toggle('short', vh < 560);
+    // Re-read the device pixel ratio each layout: browser zoom or moving to another monitor changes it
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
     renderer.setSize(vw, vh, false);
     camera.aspect = vw / vh;
     camera.clearViewOffset();
@@ -187,7 +189,6 @@ export function createScene(canvas, rootEl, quality) {
   // ================= Quality =================
   function setQuality(next) {
     q = next;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
     renderer.shadowMap.enabled = q.shadows;
     sun.castShadow = q.shadows;
     if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }

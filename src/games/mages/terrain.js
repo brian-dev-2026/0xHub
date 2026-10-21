@@ -3,7 +3,7 @@
 // seams, the props from props.js, and the tile highlight overlay.
 import * as THREE from 'three';
 import { W, H } from '../../../shared/games/mages/data';
-import { buildProps } from './props';
+import { bridgeSpans, buildProps, deckAt, deckTop } from './props';
 import { fbm, highlightCanvas, lavaGlowCanvas, mkCanvas, rippleCanvas, smooth, swatch, toTex } from './textures';
 
 export const WATER_Y = -0.1;
@@ -291,8 +291,9 @@ function buildWater(field, q, group) {
 }
 
 /**
- * buildTerrain(scene, map, quality) → { group, update(dt), dispose(), setHighlight(tiles, color), heightAt(x, z),
- * surfaceAt(x, z), standAt(tile) }. Heights take board-centred world x/z.
+ * buildTerrain(scene, map, quality) → { group, update(dt), dispose(), setHighlight(tiles, color, channel), heightAt(x, z),
+ * surfaceAt(x, z), standAt(tile) }. Heights take board-centred world x/z. heightAt is the walking height (ground, or
+ * the bridge deck inside its footprint); surfaceAt also counts the lake surface (for picking).
  */
 export function buildTerrain(scene, map, quality) {
   const q = quality, field = makeField(map), group = new THREE.Group();
@@ -324,34 +325,49 @@ export function buildTerrain(scene, map, quality) {
   const updateWater = buildWater(field, q, group);
 
   const toU = x => x + W / 2, toV = z => z + H / 2;
-  const heightAt = (x, z) => field.height(toU(x), toV(z));
+  const spans = bridgeSpans(map);
+  const walkUV = (u, v) => Math.max(field.height(u, v), deckAt(spans, u, v));
+  const heightAt = (x, z) => walkUV(toU(x), toV(z));
   const surfaceAt = (x, z) => Math.max(heightAt(x, z), WATER_Y);
-  const standAt = t => field.kinds[t] === K.water && field.extra[t] < 0 ? STONE_Y : field.height((t % W) + 0.5, Math.floor(t / W) + 0.5);
+  const standAt = t => {
+    if (field.extra[t] === K.bridge) return deckTop(0);
+    return field.kinds[t] === K.water ? STONE_Y : field.height((t % W) + 0.5, Math.floor(t / W) + 0.5);
+  };
 
-  const props = buildProps(map, { quality: q, field, K, WATER_Y, STONE_Y });
+  const props = buildProps(map, { quality: q, field, WATER_Y, STONE_Y });
   group.add(props.group);
 
-  // Tile highlight: a ring draped over the surface of each highlighted tile
-  const hlMat = new THREE.MeshBasicMaterial({
-    map: toTex(highlightCanvas(), { aniso: q.aniso }), transparent: true, depthWrite: false, toneMapped: false, fog: false,
-    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-  });
-  const hlGeo = new Map(), hlMeshes = [], hlGroup = new THREE.Group();
+  // Tile highlights: rings draped over the surface of each highlighted tile, in independent channels (e.g. a hover
+  // ring and boost markers) so several can show at once in different colours
+  const hlTex = toTex(highlightCanvas(), { aniso: q.aniso });
+  const hlGeo = new Map(), hlChannels = new Map(), hlGroup = new THREE.Group();
   hlGroup.renderOrder = 3; group.add(hlGroup);
   const tileGeo = t => {
     if (!hlGeo.has(t)) {
-      const x = t % W, y = Math.floor(t / W), top = field.kinds[t] === K.water && field.extra[t] < 0 ? STONE_Y : -Infinity;
-      hlGeo.set(t, gridGeo(even(x + 0.03, x + 0.97, 8), even(y + 0.03, y + 0.97, 8), (u, v) => Math.max(field.height(u, v), WATER_Y, top) + 0.02, (u, v) => [u - x, 1 - (v - y)]));
+      const x = t % W, y = Math.floor(t / W), stone = field.kinds[t] === K.water && field.extra[t] < 0 ? STONE_Y : -Infinity;
+      const sp = field.extra[t] === K.bridge ? spans.find(b => b.tile === t) : null;
+      // On a bridge the ring follows the deck's arch across the whole tile, so it sits on top of the planks
+      const top = (u, v) => sp ? deckTop(sp.alongX ? u - sp.cu : v - sp.cv) : stone;
+      hlGeo.set(t, gridGeo(even(x + 0.03, x + 0.97, 8), even(y + 0.03, y + 0.97, 8), (u, v) => Math.max(walkUV(u, v), WATER_Y, top(u, v)) + 0.02, (u, v) => [u - x, 1 - (v - y)]));
     }
     return hlGeo.get(t);
   };
-  function setHighlight(tiles, color = 0xffffff) {
-    hlMat.color.set(color);
+  /** Shows rings on `tiles` in `color` for one channel, replacing that channel's previous tiles; [] clears it. */
+  function setHighlight(tiles, color = 0xffffff, channel = 'main') {
+    let ch = hlChannels.get(channel);
+    if (!ch) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: hlTex, transparent: true, depthWrite: false, toneMapped: false, fog: false,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      });
+      ch = { mat, meshes: [] }; hlChannels.set(channel, ch);
+    }
+    ch.mat.color.set(color);
     tiles.forEach((t, i) => {
-      if (!hlMeshes[i]) { hlMeshes[i] = new THREE.Mesh(tileGeo(t), hlMat); hlMeshes[i].renderOrder = 3; hlGroup.add(hlMeshes[i]); }
-      hlMeshes[i].geometry = tileGeo(t); hlMeshes[i].visible = true;
+      if (!ch.meshes[i]) { ch.meshes[i] = new THREE.Mesh(tileGeo(t), ch.mat); ch.meshes[i].renderOrder = 3; hlGroup.add(ch.meshes[i]); }
+      ch.meshes[i].geometry = tileGeo(t); ch.meshes[i].visible = true;
     });
-    for (let i = tiles.length; i < hlMeshes.length; i++) hlMeshes[i].visible = false;
+    for (let i = tiles.length; i < ch.meshes.length; i++) ch.meshes[i].visible = false;
   }
 
   scene.add(group);
@@ -368,6 +384,7 @@ export function buildTerrain(scene, map, quality) {
       scene.remove(group);
       const seen = new Set();
       group.traverse(o => {
+        if (o.isInstancedMesh) o.dispose(); // frees the instance matrix and colour buffers
         if (o.geometry && !seen.has(o.geometry)) { seen.add(o.geometry); o.geometry.dispose(); }
         for (const m of o.material ? [].concat(o.material) : []) {
           if (seen.has(m)) continue;

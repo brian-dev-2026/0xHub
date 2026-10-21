@@ -10,6 +10,31 @@ import {
 
 const TAU = Math.PI * 2;
 
+// ================= Bridge deck (shared with terrain.js for standing, walking and picking heights) =================
+const DECK_HALF_LEN = 0.66, DECK_HALF_W = 0.36, PLANK_HALF_T = 0.012;
+/** Plank centre height at distance s along the bridge from the tile centre (a gentle arch). */
+const plankY = s => -0.01 + 0.05 * (1 - (s / 0.68) ** 2);
+/** Walking surface (top of the planks) at distance s along the bridge. */
+export const deckTop = s => plankY(s) + PLANK_HALF_T;
+/** Each bridge on the map: its tile, centre (tile coords) and whether the path crosses it along x. */
+export function bridgeSpans(map) {
+  const out = [];
+  map.path.forEach((t, i) => {
+    if (map.tiles[t].terrain !== 'bridge') return;
+    const a = map.path[i - 1], b = map.path[i + 1];
+    out.push({ tile: t, cu: (t % W) + 0.5, cv: Math.floor(t / W) + 0.5, alongX: Math.floor(a / W) === Math.floor(b / W) });
+  });
+  return out;
+}
+/** Deck height at tile coords (u, v): the plank top inside a bridge's footprint, otherwise -Infinity. */
+export function deckAt(spans, u, v) {
+  for (const sp of spans) {
+    const s = sp.alongX ? u - sp.cu : v - sp.cv, across = sp.alongX ? v - sp.cv : u - sp.cu;
+    if (Math.abs(s) <= DECK_HALF_LEN && Math.abs(across) <= DECK_HALF_W) return deckTop(s);
+  }
+  return -Infinity;
+}
+
 // ================= Geometry helpers =================
 /** Averages normals of vertices that share a position (lathe seams, sphere poles), then normalizes. */
 function weldNormals(g) {
@@ -171,9 +196,9 @@ function bladeGeo(h, w, bend, rnd) {
 }
 
 /**
- * buildProps(map, ctx) → { group, update(time) }. ctx: { quality, field, K, WATER_Y, STONE_Y } from terrain.js.
+ * buildProps(map, ctx) → { group, update(time) }. ctx: { quality, field, WATER_Y, STONE_Y } from terrain.js.
  */
-export function buildProps(map, { quality: q, field, K, WATER_Y, STONE_Y }) {
+export function buildProps(map, { quality: q, field, WATER_Y, STONE_Y }) {
   const group = new THREE.Group(), seed = field.seed, rnd = prng(seed * 7919 + 13);
   const tex = (c, rx = 1, ry = 1, srgb = true) => toTex(c, { rx, ry, srgb, aniso: q.aniso });
   const ground = (u, v) => field.height(u, v);
@@ -350,12 +375,9 @@ export function buildProps(map, { quality: q, field, K, WATER_Y, STONE_Y }) {
   });
 
   // ---------- Bridge over the lake ----------
-  map.path.forEach((t, i) => {
-    if (map.tiles[t].terrain !== 'bridge') return;
-    const [cu, cv] = centre(t), a = map.path[i - 1], b = map.path[i + 1];
-    const alongX = Math.floor(a / W) === Math.floor(b / W);
+  for (const { cu, cv, alongX } of bridgeSpans(map)) {
     const br = new THREE.Group(); br.position.set(cu - W / 2, 0, cv - H / 2); if (!alongX) br.rotation.y = Math.PI / 2;
-    const deckY = s => -0.01 + 0.05 * (1 - (s / 0.68) ** 2);
+    const deckY = plankY;
     for (let s = -0.64; s <= 0.65; s += 0.128) {
       const plank = cast(new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.024, 0.72), woodMat));
       plank.position.set(s, deckY(s), (rnd() - 0.5) * 0.02); plank.rotation.set((rnd() - 0.5) * 0.04, (rnd() - 0.5) * 0.06, -Math.atan(-0.1 * s / 0.46)); br.add(plank);
@@ -366,7 +388,7 @@ export function buildProps(map, { quality: q, field, K, WATER_Y, STONE_Y }) {
       for (const x of [-0.52, 0, 0.52]) { const p = cast(new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.42, 8), woodMat)); p.position.set(x, deckY(x) - 0.03, z * 1.18); br.add(p); }
     }
     group.add(br);
-  });
+  }
 
   // ---------- Stepping stones on water tiles (where a mage stands), and reeds along the shore ----------
   const stones = [];
