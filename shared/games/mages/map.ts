@@ -211,6 +211,12 @@ export function generateMap(seed: number): GameMap {
 
 /** Tile-centre polyline point `d` tiles from the entry; clamps to the ends. */
 export function pathPoint(map: GameMap, d: number): { x: number; y: number } {
+  const p = pathPointInto(map, d, new Float64Array(2));
+  return { x: p[0], y: p[1] };
+}
+
+/** pathPoint without allocating: writes x into out[i] and y into out[i + 1], and returns `out`. */
+export function pathPointInto(map: GameMap, d: number, out: Float64Array, i0 = 0): Float64Array {
   const last = map.path.length - 1;
   const c = Math.max(0, Math.min(last, d));
   const i = Math.floor(c);
@@ -218,9 +224,15 @@ export function pathPoint(map: GameMap, d: number): { x: number; y: number } {
   const a = map.path[i];
   const ax = (a % W) + 0.5;
   const ay = Math.floor(a / W) + 0.5;
-  if (i >= last || f === 0) return { x: ax, y: ay };
-  const b = map.path[i + 1];
-  return { x: ax + ((b % W) + 0.5 - ax) * f, y: ay + (Math.floor(b / W) + 0.5 - ay) * f };
+  if (i >= last || f === 0) {
+    out[i0] = ax;
+    out[i0 + 1] = ay;
+  } else {
+    const b = map.path[i + 1];
+    out[i0] = ax + ((b % W) + 0.5 - ax) * f;
+    out[i0 + 1] = ay + (Math.floor(b / W) + 0.5 - ay) * f;
+  }
+  return out;
 }
 
 export function pathLength(map: GameMap): number {

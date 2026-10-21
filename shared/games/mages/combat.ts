@@ -2,7 +2,7 @@
 // (no Math.pow/sin/cos). Passives live here; actives and zones in actives.ts; Tasks 7-8 add traps and bosses.
 
 import { ACTIVE_CHARGE_SECS, BOSS_STUN, ECON, LEVEL, MAGES, PASSIVES, SHIELD_DAMAGE, TERRAIN_BOOST, TICK_HZ, W, enemyDef, secs } from "./data";
-import { pathPoint } from "./map";
+import { pathPoint, pathPointInto } from "./map";
 import type { Enemy, Mage, Sim, SimEvent } from "./sim";
 
 /** base^n for a whole n >= 0. */
@@ -71,23 +71,8 @@ function enemyPos(sim: Sim, e: Enemy): Float64Array {
   let pos = e.pos;
   if (pos === undefined) pos = e.pos = new Float64Array([NaN, 0, 0]);
   if (pos[0] !== e.d) {
-    // pathPoint(sim.map, e.d), inlined to avoid allocating.
-    const path = sim.map.path;
-    const last = path.length - 1;
-    const c = Math.max(0, Math.min(last, e.d));
-    const i = Math.floor(c);
-    const f = c - i;
-    const a = path[i];
-    let px = (a % W) + 0.5;
-    let py = Math.floor(a / W) + 0.5;
-    if (i < last && f !== 0) {
-      const b = path[i + 1];
-      px = px + ((b % W) + 0.5 - px) * f;
-      py = py + (Math.floor(b / W) + 0.5 - py) * f;
-    }
     pos[0] = e.d;
-    pos[1] = px;
-    pos[2] = py;
+    pathPointInto(sim.map, e.d, pos, 1);
   }
   return pos;
 }

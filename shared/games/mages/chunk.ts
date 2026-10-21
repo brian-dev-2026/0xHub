@@ -5,7 +5,7 @@
 import { ENDLESS_MAX_WAVES, MAGES, SPELLS, TRAPS, W, H, secs, type MageId, type SpellId, type TrapId } from "./data";
 import { generateMap } from "./map";
 import { restoreRng } from "./rng";
-import { stars, step, type Action, type Sim, type SimConfig } from "./sim";
+import { stars, step, type Action, type Enemy, type Mage, type Sim, type SimConfig } from "./sim";
 import { STAGE_WAVES } from "./waves";
 
 export interface Outcome {
@@ -44,8 +44,16 @@ export function outcomeOf(sim: Sim): Outcome {
   };
 }
 
-/** A Sim as plain JSON: the map is rebuilt from the seed and the RNGs are kept as their states. */
-export type SimSnapshot = Omit<Sim, "map" | "rng" | "combatRng"> & { rng: number; combatRng: number };
+/**
+ * A Sim as plain JSON: the map is rebuilt from the seed, the RNGs are kept as their
+ * states, and the performance caches (Enemy.def and .pos, Mage.statsFor) are left out.
+ */
+export type SimSnapshot = Omit<Sim, "map" | "rng" | "combatRng" | "enemies" | "mages"> & {
+  enemies: Omit<Enemy, "def" | "pos">[];
+  mages: Omit<Mage, "statsFor">[];
+  rng: number;
+  combatRng: number;
+};
 
 /** Plain-JSON copy of the sim's state (shares nothing with `sim`). */
 export function serializeSim(sim: Sim): SimSnapshot {
@@ -76,7 +84,8 @@ export function restoreSim(snap: SimSnapshot): Sim {
 
 const MAGE_IDS = Object.keys(MAGES) as MageId[];
 const TRAP_IDS = Object.keys(TRAPS) as TrapId[];
-const SPELL_IDS = Object.keys(SPELLS) as SpellId[];
+/** Spell ids in SPELLS declaration order (fixed, so hashSim can iterate it). */
+export const SPELL_IDS: readonly SpellId[] = Object.keys(SPELLS) as SpellId[];
 
 const isPlainObject = (x: unknown): x is Record<string, unknown> => {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
@@ -140,13 +149,12 @@ export function validateActions(raw: unknown, fromTick: number, upTo: number, ma
 }
 
 /**
- * Last tick a chunk starting now may run to: the tick the current wave or build
- * break began plus CHUNK_SECS. Before wave 1 the build phase has no timer, so
- * there it counts from the chunk start (idle time costs one bounded chunk per request).
+ * Last tick a chunk starting now may run to: CHUNK_SECS past the chunk start,
+ * whatever the wave boundaries (so a stalled wave is verified over several chunks,
+ * and idle time before wave 1 costs one bounded chunk per request).
  */
 export function chunkLimit(sim: Sim): number {
-  const from = sim.phase === "build" && sim.wave === 0 ? sim.tick : sim.phaseTick;
-  return from + secs(CHUNK_SECS);
+  return sim.tick + secs(CHUNK_SECS);
 }
 
 /**

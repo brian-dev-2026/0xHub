@@ -4,7 +4,7 @@ import { CHUNK_SECS, advance, outcomeOf, restoreSim, serializeSim, validateActio
 import { COST_SCRIPT, STRONG, endlessCfg, play, rankedTiles, stageCfg } from "./play.testutil";
 import { MAX_ACTIONS, hashSim, maxTicksFor, replay } from "./replay";
 import { restoreRng, makeRng } from "./rng";
-import { createSim, step, type Action, type Sim } from "./sim";
+import { createSim, spawnForTest, step, type Action, type Sim } from "./sim";
 
 // hashSim after every waveEnd, recorded before the Task 9b optimisations; they must never change.
 const PINNED_STAGE = [3601999107, 1188798360, 4106379626, 179245956, 2662650875, 4217634880, 249232307, 1173117219, 2874727905, 1290134735];
@@ -96,18 +96,19 @@ describe("mage siege chunks", () => {
     expect(outcomeOf(run.sim)).toMatchObject({ wavesCleared: 7, lives: 0, score: 704 });
   });
 
-  it("advance rejects upTo past one wave plus 150 s", () => {
+  it("advance rejects a chunk longer than 150 s", () => {
     const limit = secs(CHUNK_SECS);
-    // Wave 0 build: at most 150 s past the chunk start, so idle time costs one bounded chunk per request.
+    // Wave 0 build: a lone far-future startWave cannot be reached in one chunk; idle time costs one bounded chunk per request.
     const idle = createSim(stageCfg());
+    expect(advance(idle, [{ t: limit + 5, type: "startWave" }], limit + 6)).toEqual({ ok: false, error: "chunk too long" });
     expect(advance(idle, [], limit + 1)).toEqual({ ok: false, error: "chunk too long" });
     expect(advance(idle, [], limit)).toEqual({ ok: true });
     expect(advance(idle, [{ t: limit + 5, type: "startWave" }], 2 * limit + 1)).toEqual({ ok: false, error: "chunk too long" });
 
-    // In a wave the limit counts from the tick the wave began, not from the chunk start.
+    // The limit counts from the chunk start, whatever the wave boundaries.
     const sim = createSim(stageCfg());
     expect(advance(sim, [{ t: 0, type: "startWave" }], 100)).toEqual({ ok: true });
-    expect(advance(sim, [], limit + 1)).toEqual({ ok: false, error: "chunk too long" });
+    expect(advance(sim, [], 100 + limit + 1)).toEqual({ ok: false, error: "chunk too long" });
     expect(advance(sim, [], 200)).toEqual({ ok: true });
 
     const bad = createSim(stageCfg());
@@ -132,6 +133,48 @@ describe("mage siege chunks", () => {
     expect(advance(over, [], end)).toEqual({ ok: true });
     expect(advance(over, [], end + 1)).toEqual({ ok: false, error: "chunk runs past the end of the game" });
     expect(advance(short, lastActs, end + 30)).toEqual({ ok: false, error: "chunk runs past the end of the game" });
+  });
+
+  it("a wave stalled past 150 s verifies in several chunks", () => {
+    // A sapling never moves and nothing attacks it, so wave 1 never ends.
+    const cfg = stageCfg({ __noLeak: true });
+    const live = createSim(cfg);
+    step(live, [{ t: 0, type: "startWave" }]);
+    const stall = (s: Sim) => spawnForTest(s, "sapling", 5);
+    stall(live);
+    const end = secs(400);
+    stepTo(live, [], end);
+    expect(live.phase).toBe("wave");
+    expect(live.wave).toBe(1);
+
+    let sim = createSim(cfg);
+    expect(advance(sim, [{ t: 0, type: "startWave" }], 1)).toEqual({ ok: true });
+    stall(sim);
+    // One chunk for the whole stall is too long...
+    expect(advance(restoreSim(serializeSim(sim)), [], end)).toEqual({ ok: false, error: "chunk too long" });
+    // ...but the client's chunks (every 120 s of sim time) verify it.
+    while (sim.tick < end) {
+      expect(advance(sim, [], Math.min(end, sim.tick + secs(120)))).toEqual({ ok: true });
+      sim = roundTrip(sim);
+    }
+    expect(hashSim(sim)).toBe(hashSim(live));
+  });
+
+  it("chunks cut at every waveEnd or every 120 s equal one replay", () => {
+    for (const [cfg, run] of [[stageCfg(), win], [endlessCfg({ __noLeak: true }), cost]] as const) {
+      let sim = createSim(cfg);
+      const hashes: number[] = [];
+      for (const waveEnd of run.waveEnds)
+        while (sim.tick < waveEnd) {
+          const upTo = Math.min(waveEnd, sim.tick + secs(120));
+          const acts = validateActions(run.actions.filter((a) => a.t >= sim.tick && a.t < upTo), sim.tick, upTo, MAX_ACTIONS);
+          if (typeof acts === "string") throw new Error(acts);
+          expect(advance(sim, acts, upTo)).toEqual({ ok: true });
+          if (upTo === waveEnd) hashes.push(hashSim(sim));
+          sim = roundTrip(sim);
+        }
+      expect(hashes).toEqual(run.hashes);
+    }
   });
 
   it("advance rejects stale or out-of-range actions", () => {

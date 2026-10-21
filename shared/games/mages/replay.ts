@@ -2,7 +2,7 @@
 // server replays them headless with its own seed and records only the replay's
 // outcome. hashSim fingerprints the state so tests can check determinism.
 
-import { MAX_ACTIONS, maxTicksFor, outcomeOf, validateActions, type Outcome } from "./chunk";
+import { MAX_ACTIONS, SPELL_IDS, maxTicksFor, outcomeOf, validateActions, type Outcome } from "./chunk";
 import { createSim, step, type Action, type Sim, type SimConfig, type SimEvent } from "./sim";
 
 export { MAX_ACTIONS, maxTicksFor, type Outcome };
@@ -32,7 +32,7 @@ export function hashSim(sim: Sim): number {
   num(sim.rng.state()); num(sim.combatRng.state());
   num(sim.breakT); num(sim.phaseTick); num(sim.wavesCleared); num(sim.livesAtClear);
   num(sim.purchases); num(sim.nextId); num(sim.kills); str(sim.shatter ? "1" : "0");
-  num(sim.spellCd.meteor); num(sim.spellCd.freeze); num(sim.spellCd.surge);
+  for (const k of SPELL_IDS) num(sim.spellCd[k]);
   str("Q");
   for (const q of sim.spawnQueue) {
     num(q.tick); str(q.kind);
