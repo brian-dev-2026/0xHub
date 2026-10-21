@@ -443,7 +443,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     const have = unlocked(progress);
     const cfg: Omit<SimConfig, "seed"> = { mode, stage: stage as SimConfig["stage"], team: b.team as SimConfig["team"], traps: have.traps, spells: have.spells };
     const runId = crypto.randomUUID();
-    const { seed } = await env.MAGE_RUN.get(env.MAGE_RUN.idFromName(runId)).init(u.id, cfg);
+    const { seed } = await env.MAGE_RUN.get(env.MAGE_RUN.idFromName(runId)).init(runId, u.id, cfg);
     return json({ runId, seed, cfg: { ...cfg, seed } });
   }
 
