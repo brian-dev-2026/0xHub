@@ -6,6 +6,7 @@ import {
   BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
+import { castActive, wallStop, zoneTick } from "./actives";
 import { combatTick, killEnemy, magePrice, refreshShatter, statusTick } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
@@ -65,6 +66,24 @@ export interface Enemy {
   gold: number;
 }
 
+/**
+ * An area an active leaves on the path, centred `d` tiles from the entry with
+ * radius `r`; `t` is ticks left. `dmg` is the caster's hit damage at cast time
+ * (zones keep working after the caster is sold); `owner` is credited for kills.
+ */
+export interface Zone {
+  id: number;
+  kind: "lava" | "blizzard" | "plague" | "charged" | "wall" | "tornado";
+  d: number;
+  r: number;
+  t: number;
+  level: number;
+  owner: number;
+  dmg: number;
+  /** Tornado only: tiles each enemy (by id) has been carried back so far. */
+  carried?: Record<number, number>;
+}
+
 export interface Mage {
   id: number;
   kind: MageId;
@@ -103,6 +122,8 @@ export interface Sim {
   kills: number;
   /** Frozen enemies take +50% damage (kept up by the Ice L5 passive, Task 5). */
   shatter: boolean;
+  /** Areas left by actives, advanced by zoneTick. */
+  zones: Zone[];
 }
 
 export type SimEvent =
@@ -119,6 +140,7 @@ export type SimEvent =
       kind: "burn" | "burnSpread" | "explode" | "chill" | "freeze" | "shatter" | "chain" | "armorBreak" | "quake" | "venom" | "venomJump" | "gust";
       targets: number[];
     }
+  | { type: "cast"; mage: number; skill: MageId; level: number; target?: number; hits: number[] }
   | { type: "waveStart"; wave: number }
   | { type: "waveEnd"; wave: number; bonus: number }
   | { type: "end"; won: boolean };
@@ -145,6 +167,7 @@ export function createSim(cfg: SimConfig): Sim {
     rejected: 0,
     kills: 0,
     shatter: false,
+    zones: [],
   };
 }
 
@@ -267,7 +290,11 @@ function applyActionInner(sim: Sim, a: Action, ev: SimEvent[]): boolean {
       ev.push({ type: "sell", tile: a.tile, refund });
       return true;
     }
-    // cast (Task 5), trap (Task 6), spell (Task 7).
+    case "cast": {
+      const m = mageOn(sim, a.tile);
+      return m !== undefined && castActive(sim, m, a.target, ev);
+    }
+    // trap and spell: Task 7.
     default:
       return false;
   }
@@ -302,8 +329,8 @@ function terrainFactor(sim: Sim, e: Enemy): number {
 
 function moveEnemies(sim: Sim): void {
   for (const e of sim.enemies) {
-    if (e.status.freezeT > 0) continue;
-    e.d += (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ;
+    if (e.status.freezeT > 0 || e.status.stunT > 0) continue;
+    e.d = wallStop(sim, e, e.d + (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ);
   }
 }
 
@@ -335,10 +362,11 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
  * left for later (ignored here), and those with `t < sim.tick` are stale and
  * count in `rejected`. Pass each action to step() only until its tick.
  * Order:
- *  1. apply this tick's actions (rejected and stale ones count in `rejected`)
+ *  1. apply this tick's actions (rejected and stale ones count in `rejected`); casts act now
  *  2. build break countdown; at 0 the next wave starts
  *  3. spawn due enemies
- *  4. status ticks (burn, poison, timers), mage combat (later tasks: traps/hazards, boss abilities)
+ *  4. status ticks (burn, poison, timers), mage combat (meters charge here), zones
+ *     (lava, blizzard, plague, charged ground, walls, tornadoes); later tasks: traps/hazards, boss abilities
  *  5. reap enemies at 0 HP
  *  6. move enemies
  *  7. leaks
@@ -364,7 +392,10 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
   // exactly secs(S) ticks (T..T+N-1) and burn/poison deal N ticks of damage (T+1..T+N).
   statusTick(sim, ev);
   combatTick(sim, ev);
-  // Tasks 6-8 add here: mage actives, stun, trap and spell hazards, shaman/boss abilities.
+  // Zones run after status timers, so the slow/no-heal they keep up (1 tick) holds for
+  // the rest of this tick, and before movement, so walls block it.
+  zoneTick(sim, ev);
+  // Tasks 7-8 add here: trap and spell hazards, shaman/boss abilities.
 
   reapDead(sim, ev);
   moveEnemies(sim);

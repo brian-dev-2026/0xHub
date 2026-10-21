@@ -1,5 +1,5 @@
 // Mage Siege combat: mage stats, damage, kills and basic attacks. Deterministic
-// (no Math.pow/sin/cos). Tasks 5-8 add passives, actives, traps and bosses on top.
+// (no Math.pow/sin/cos). Passives live here; actives and zones in actives.ts; Tasks 7-8 add traps and bosses.
 
 import { ACTIVE_CHARGE_SECS, ECON, ENEMIES, LEVEL, MAGES, PASSIVES, TERRAIN_BOOST, TICK_HZ, secs } from "./data";
 import { pathPoint } from "./map";
@@ -50,7 +50,7 @@ export function killEnemy(sim: Sim, e: Enemy, by: Mage | null, ev: SimEvent[]): 
   onDeath(sim, e, ev);
 }
 
-const dist = (ax: number, ay: number, bx: number, by: number): number => {
+export const dist = (ax: number, ay: number, bx: number, by: number): number => {
   const dx = ax - bx;
   const dy = ay - by;
   return Math.sqrt(dx * dx + dy * dy);
@@ -114,10 +114,10 @@ function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
 }
 
 /** The mage with this id, or null once it has been sold or merged away. */
-const mageById = (sim: Sim, id: number): Mage | null => sim.mages.find((m) => m.id === id) ?? null;
+export const mageById = (sim: Sim, id: number): Mage | null => sim.mages.find((m) => m.id === id) ?? null;
 
 /** Sets a burn unless a stronger one (higher dps) is already active; the stronger keeps its level and owner. */
-function applyBurn(e: Enemy, dps: number, hit: number, lv: number, by: number): void {
+export function applyBurn(e: Enemy, dps: number, hit: number, lv: number, by: number): void {
   const st = e.status;
   if (st.burnT > 0 && st.burnDps > dps) return;
   st.burnDps = dps;
@@ -157,6 +157,8 @@ export function statusTick(sim: Sim, ev: SimEvent[]): void {
     }
     if (st.slowT > 0 && --st.slowT === 0) st.slow = 0;
     if (st.freezeT > 0) st.freezeT--;
+    if (st.stunT > 0) st.stunT--;
+    if (st.noHealT > 0) st.noHealT--;
   }
 }
 
@@ -170,11 +172,14 @@ export function damage(sim: Sim, e: Enemy, amount: number, by: Mage | null, ev: 
   if (e.hp <= 0) killEnemy(sim, e, by, ev);
 }
 
+const CHARGE_EPS = 1e-9;
+
 /** Charges meters, then each ready mage hits the frontmost enemy in range. */
 export function combatTick(sim: Sim, ev: SimEvent[]): void {
   for (const m of sim.mages) {
     const s = mageStats(sim, m);
-    m.charge = Math.min(1, m.charge + s.chargeRate);
+    // Snap to full within float error so N steps of 1/N fill the meter on tick N.
+    m.charge = m.charge + s.chargeRate >= 1 - CHARGE_EPS ? 1 : m.charge + s.chargeRate;
     if (m.stunT > 0) m.stunT--;
     if (m.cd > 0) m.cd--;
     if (m.cd > 0 || m.stunT > 0) continue;

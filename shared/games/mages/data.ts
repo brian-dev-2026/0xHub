@@ -155,6 +155,42 @@ export const PASSIVES = {
   knockback: [0.5, 0.5, 0.5, 0.5, 1],
 };
 
+/** Active skill numbers not in the per-level tables (seconds, tiles, tiles/s, multiples of hit damage). */
+export const ACTIVES = {
+  /** Hit radius around a pillar, quake tile, charged/lava zone, and tornado touch radius. */
+  zoneRadius: 0.6,
+  /** Level whose active leaves lava, charged ground, a rock wall, a drifting cloud or a second tornado. */
+  bonusLevel: 5,
+  /** Fire: each pillar deals 300%; L5 lava burns (the caster's L5 burn) for 5 s. */
+  pillarDmg: 3,
+  lavaSecs: 5,
+  /** Ice: blizzard lasts 4 s, slows 50%, 60% hit damage per second; L5 freezes everything inside for 2 s on start. */
+  blizzardSecs: 4,
+  blizzardSlow: 0.5,
+  blizzardDps: 0.6,
+  blizzardFreezeSecs: 2,
+  /** Lightning: strikes within 2x range for 250%; L5 struck tiles zap 50% hit damage per second for 4 s. */
+  thunderRange: 2,
+  thunderDmg: 2.5,
+  chargedSecs: 4,
+  chargedDps: 0.5,
+  /** Earth: 200% damage; L5 rock wall blocks ground enemies for 3 s. */
+  quakeDmg: 2,
+  wallSecs: 3,
+  /** Poison: cloud lasts 5 s and adds 1 stack every second. */
+  plagueSecs: 5,
+  plagueStackSecs: 1,
+  /** Wind: travels back from the exit at 4 tiles/s for 3 s, carries each ground enemy at most 2 tiles, 100% hit damage per second; the L5 second one starts 1 s later. */
+  tornadoSecs: 3,
+  tornadoSpeed: 4,
+  tornadoCarry: 2,
+  tornadoDps: 1,
+  tornadoDelaySecs: 1,
+};
+
+/** Bosses (mini and final) take stuns and freezes this much as long. */
+export const BOSS_STUN = 0.5;
+
 export const TERRAIN_BOOST = {
   dmg: 0.3,
   hillRange: 0.25,
