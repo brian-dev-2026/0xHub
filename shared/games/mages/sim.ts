@@ -3,9 +3,10 @@
 // events step() returns; gameplay changes only through actions.
 
 import {
-  BUILD_BREAK_SECS, ECON, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
+  BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
+import { combatTick, killEnemy, magePrice } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
 import { STAGE_WAVES, endlessWave, type Group } from "./waves";
@@ -92,11 +93,17 @@ export interface Sim {
   nextId: number;
   rejected: number;
   kills: number;
+  /** Frozen enemies take +50% damage (kept up by the Ice L5 passive, Task 5). */
+  shatter: boolean;
 }
 
 export type SimEvent =
   | { type: "spawn"; enemy: number }
   | { type: "leak"; enemy: number; lives: number }
+  | { type: "attack"; mage: number; enemy: number }
+  | { type: "place"; mage: number }
+  | { type: "merge"; mage: number; level: number }
+  | { type: "sell"; tile: number; refund: number }
   | { type: "kill"; enemy: number; by: number | null; gold: number }
   | { type: "waveStart"; wave: number }
   | { type: "waveEnd"; wave: number; bonus: number }
@@ -122,6 +129,7 @@ export function createSim(cfg: SimConfig): Sim {
     nextId: 1,
     rejected: 0,
     kills: 0,
+    shatter: false,
   };
 }
 
@@ -186,6 +194,15 @@ function startNextWave(sim: Sim, ev: SimEvent[]): void {
   ev.push({ type: "waveStart", wave: sim.wave });
 }
 
+const mageOn = (sim: Sim, tile: number): Mage | undefined => sim.mages.find((m) => m.tile === tile);
+
+/** A buildable (not path, not blocked) tile with no mage on it. */
+function isFreeBuildTile(sim: Sim, tile: number): boolean {
+  if (!Number.isInteger(tile) || tile < 0 || tile >= sim.map.tiles.length) return false;
+  const t = sim.map.tiles[tile];
+  return t.kind === "build" && t.terrain !== "blocked" && !mageOn(sim, tile);
+}
+
 /** Applies one action; returns false (and changes nothing) when it is not allowed now. */
 export function applyAction(sim: Sim, a: Action, ev: SimEvent[]): boolean {
   switch (a.type) {
@@ -194,7 +211,42 @@ export function applyAction(sim: Sim, a: Action, ev: SimEvent[]): boolean {
       if (sim.phase !== "build" || sim.wave >= totalWaves(sim)) return false;
       startNextWave(sim, ev);
       return true;
-    // place, merge, move, sell, cast (Tasks 4-5), trap (Task 6), spell (Task 7).
+    case "place": {
+      const price = magePrice(sim);
+      if (!sim.cfg.team.includes(a.mage) || sim.gold < price || !isFreeBuildTile(sim, a.tile)) return false;
+      sim.gold -= price;
+      sim.purchases++;
+      const m: Mage = { id: sim.nextId++, kind: a.mage, level: 1, tile: a.tile, cd: 0, charge: 0, hits: 0, stunT: 0, spent: price };
+      sim.mages.push(m);
+      ev.push({ type: "place", mage: m.id });
+      return true;
+    }
+    case "merge": {
+      const from = mageOn(sim, a.from);
+      const to = mageOn(sim, a.to);
+      if (!from || !to || from === to || from.kind !== to.kind || from.level !== to.level || to.level >= MAX_LEVEL) return false;
+      to.level = (to.level + 1) as Mage["level"];
+      to.spent += from.spent;
+      sim.mages.splice(sim.mages.indexOf(from), 1);
+      ev.push({ type: "merge", mage: to.id, level: to.level });
+      return true;
+    }
+    case "move": {
+      const m = mageOn(sim, a.from);
+      if (!m || !isFreeBuildTile(sim, a.to)) return false;
+      m.tile = a.to;
+      return true;
+    }
+    case "sell": {
+      const m = mageOn(sim, a.tile);
+      if (!m) return false;
+      const refund = Math.floor(m.spent * ECON.sellRate);
+      sim.gold += refund;
+      sim.mages.splice(sim.mages.indexOf(m), 1);
+      ev.push({ type: "sell", tile: a.tile, refund });
+      return true;
+    }
+    // cast (Task 5), trap (Task 6), spell (Task 7).
     default:
       return false;
   }
@@ -207,15 +259,9 @@ function spawnDue(sim: Sim, ev: SimEvent[]): void {
   }
 }
 
-/** Removes enemies at 0 HP, paying their gold. */
+/** Kills enemies left at 0 HP by something other than damage() (e.g. test hooks). */
 function reapDead(sim: Sim, ev: SimEvent[]): void {
-  sim.enemies = sim.enemies.filter((e) => {
-    if (e.hp > 0) return true;
-    sim.gold += e.gold;
-    sim.kills++;
-    ev.push({ type: "kill", enemy: e.id, by: null, gold: e.gold });
-    return false;
-  });
+  for (const e of sim.enemies.filter((x) => x.hp <= 0)) killEnemy(sim, e, null, ev);
 }
 
 const BRIDGE_SPEED = 0.5;
@@ -290,7 +336,8 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
 
   spawnDue(sim, ev);
 
-  // Tasks 4-8 add here: mage attacks and actives, status ticks (burn, poison,
+  combatTick(sim, ev);
+  // Tasks 5-8 add here: mage actives, status ticks (burn, poison,
   // slow, stun), trap and spell hazards, shaman/boss abilities.
 
   reapDead(sim, ev);
