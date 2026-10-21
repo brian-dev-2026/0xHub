@@ -233,6 +233,7 @@ describe("ancient treant", () => {
     t.hp = 5000;
     for (let i = 0; i < 2; i++) {
       const s = foe(sim, "sapling", 12 + i);
+      s.owner = t.id;
       s.hp = s.maxHp = 1e9;
     }
     run(sim, secs(1));
@@ -254,9 +255,43 @@ describe("ancient treant", () => {
     t.status.freezeT = 1e6; // hold it still (skills still run)
     run(sim, secs(10) + 1);
     expect(alive(sim, "sapling")).toHaveLength(3);
+    const ids = alive(sim, "sapling").map((s) => s.id);
+    const gold = sim.gold;
     t.hp = 0;
-    run(sim, 1);
+    const ev = run(sim, 1);
     expect(sim.enemies).toHaveLength(0);
+    // Withered, not killed: one kill (the Treant), no sapling gold, a despawn event each.
+    expect(sim.kills).toBe(1);
+    expect(sim.gold).toBe(gold + ENEMIES.treant.gold);
+    expect(ev.filter((x) => x.type === "kill").map((x) => (x as { enemy: number }).enemy)).toEqual([t.id]);
+    expect(ev.filter((x) => x.type === "despawn").map((x) => (x as { enemy: number }).enemy)).toEqual(ids);
+  });
+
+  it("each treant heals only from its own saplings and takes only its own with it", () => {
+    const sim = newSim(5);
+    const a = foe(sim, "treant", 5, 10000);
+    const b = foe(sim, "treant", 15, 10000);
+    for (const t of [a, b]) {
+      t.status.freezeT = 1e6;
+      t.hp = 5000;
+    }
+    const plant = (t: Enemy, n: number): void => {
+      for (let i = 0; i < n; i++) {
+        const s = foe(sim, "sapling", t.d + 1 + i);
+        s.hp = s.maxHp = 1e9;
+        s.owner = t.id;
+      }
+    };
+    plant(a, 1);
+    plant(b, 3);
+    run(sim, secs(1) + 1);
+    expect(a.hp).toBeCloseTo(5000 + 0.02 * 10000, 6);
+    expect(b.hp).toBeCloseTo(5000 + 3 * 0.02 * 10000, 6);
+    a.hp = 0;
+    run(sim, 1);
+    expect(sim.enemies.filter((e) => e.kind === "sapling" && e.owner === b.id)).toHaveLength(3);
+    expect(sim.enemies.filter((e) => e.kind === "sapling" && e.owner === a.id)).toHaveLength(0);
+    expect(alive(sim, "treant")).toEqual([b]);
   });
 
   it("root slam stuns the 3 nearest mages for 3 s", () => {

@@ -91,8 +91,12 @@ function nearest(sim: Sim, from: Enemy, list: Enemy[]): Enemy | null {
  */
 function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
   const st = e.status;
-  // Saplings die with their Treant (no gold).
-  if (e.kind === "treant") for (const s of sim.enemies.filter((o) => o.kind === "sapling")) killEnemy(sim, s, null, ev);
+  // A Treant's own saplings wither with it: removed, not killed (no gold, no kill count).
+  if (e.kind === "treant")
+    for (const s of sim.enemies.filter((o) => o.owner === e.id)) {
+      sim.enemies.splice(sim.enemies.indexOf(s), 1);
+      ev.push({ type: "despawn", enemy: s.id });
+    }
   if (st.burnT > 0 && st.burnLv >= PASSIVES.burnSpreadLevel) {
     const owner = mageById(sim, st.burnBy);
     const spread = near(sim, e, PASSIVES.burnSpreadRadius);

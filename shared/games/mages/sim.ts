@@ -70,6 +70,8 @@ export interface Enemy {
   gold: number;
   /** Trait and boss-skill timers (see bosses.ts). */
   abil: Abilities;
+  /** Saplings only: id of the Treant that planted it. */
+  owner?: number;
 }
 
 /**
@@ -151,6 +153,7 @@ export type SimEvent =
   | { type: "place"; mage: number }
   | { type: "merge"; mage: number; level: number }
   | { type: "sell"; tile: number; refund: number }
+  | { type: "despawn"; enemy: number }
   | { type: "kill"; enemy: number; by: number | null; gold: number }
   | {
       type: "passive";

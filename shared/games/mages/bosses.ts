@@ -3,7 +3,7 @@
 // tick from step(), after the zones (so a plague cloud's no-heal already holds) and
 // before reaping and movement. Damage-side effects stay in combat.ts.
 
-import { ABILITIES as A, ENEMIES, secs } from "./data";
+import { ABILITIES as A, ENEMIES, W, secs } from "./data";
 import { dist } from "./combat";
 import { pathLength, pathPoint } from "./map";
 import { stunMage } from "./actives";
@@ -124,18 +124,19 @@ function treant(sim: Sim, e: Enemy, ev: SimEvent[], note: (skill: "saplings" | "
     const ids: number[] = [];
     for (let i = 1; i <= A.treantSaplings; i++) {
       const s = spawnEnemy(sim, "sapling", Math.min(e.d + i, last));
+      s.owner = e.id;
       ids.push(s.id);
       ev.push({ type: "spawn", enemy: s.id });
     }
     note("saplings", ids);
   }
   if (due(sim, e, "nextHeal", A.treantHealSecs)) {
-    const n = sim.enemies.filter((o) => o.kind === "sapling" && o.hp > 0).length;
+    const n = sim.enemies.filter((o) => o.owner === e.id && o.hp > 0).length;
     if (n > 0 && heal(e, e.maxHp * A.treantHealPctPerSapling * n)) note("heal", [e.id]);
   }
   if (due(sim, e, "nextSlam", A.treantSlamSecs)) {
     const c = pathPoint(sim.map, e.d);
-    const away = (m: { tile: number }): number => dist((m.tile % 16) + 0.5, Math.floor(m.tile / 16) + 0.5, c.x, c.y);
+    const away = (m: { tile: number }): number => dist((m.tile % W) + 0.5, Math.floor(m.tile / W) + 0.5, c.x, c.y);
     const hit = [...sim.mages].sort((a, b) => away(a) - away(b) || a.id - b.id).slice(0, A.treantSlamTargets);
     for (const m of hit) stunMage(m, A.treantSlamStunSecs);
     note("rootSlam", hit.map((m) => m.id));
