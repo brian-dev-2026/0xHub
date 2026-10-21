@@ -252,6 +252,8 @@ export const ENDLESS_WAVE_HP = 1.12;
 export const ENDLESS_MAX_WAVES = 300;
 /** Spike and mine damage multiplier per stage. */
 export const TRAP_STAGE_SCALE = 1.25;
+/** Meteor damage multiplier per stage. */
+export const METEOR_STAGE_SCALE = 1.35;
 
 export interface Unlock {
   mages?: MageId[];

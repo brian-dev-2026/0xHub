@@ -7,6 +7,7 @@ import {
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
 import { castActive, wallStop, zoneTick } from "./actives";
+import { castSpell, hazardTick, placeTrap, powi, trapStop } from "./hazards";
 import { combatTick, killEnemy, magePrice, refreshShatter, statusTick } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
@@ -62,6 +63,8 @@ export interface Enemy {
   d: number;
   /** Tiles per second. */
   speed: number;
+  /** Path tile order the enemy was on at the last hazard tick (floor(d + 0.5)); a change is "entering" a tile. */
+  order: number;
   status: Status;
   gold: number;
 }
@@ -98,6 +101,14 @@ export interface Mage {
   spent: number;
 }
 
+/** A trap on a path tile; `dur` is its durability left (it breaks at 0). */
+export interface Trap {
+  id: number;
+  kind: TrapId;
+  tile: number;
+  dur: number;
+}
+
 export interface Sim {
   cfg: SimConfig;
   map: GameMap;
@@ -124,6 +135,10 @@ export interface Sim {
   shatter: boolean;
   /** Areas left by actives, advanced by zoneTick. */
   zones: Zone[];
+  /** Traps on the path (at most MAX_TRAPS). */
+  traps: Trap[];
+  /** Ticks left before each spell can be cast again; 0 is ready. */
+  spellCd: Record<SpellId, number>;
 }
 
 export type SimEvent =
@@ -141,6 +156,10 @@ export type SimEvent =
       targets: number[];
     }
   | { type: "cast"; mage: number; skill: MageId; level: number; target?: number; hits: number[] }
+  | { type: "trapPlace"; trap: number }
+  | { type: "trapTrigger"; trap: number; enemies: number[] }
+  | { type: "trapBreak"; trap: number }
+  | { type: "spell"; spell: SpellId; target?: number }
   | { type: "waveStart"; wave: number }
   | { type: "waveEnd"; wave: number; bonus: number }
   | { type: "end"; won: boolean };
@@ -168,6 +187,8 @@ export function createSim(cfg: SimConfig): Sim {
     kills: 0,
     shatter: false,
     zones: [],
+    traps: [],
+    spellCd: { meteor: 0, freeze: 0, surge: 0 },
   };
 }
 
@@ -181,13 +202,6 @@ export function stars(sim: Sim): 0 | 1 | 2 | 3 {
   if (sim.lives >= STARS[1]) return 2;
   return 1;
 }
-
-/** base^n for a whole n >= 0 (Math.pow is not deterministic across engines). */
-const powi = (base: number, n: number): number => {
-  let r = 1;
-  for (let i = 0; i < n; i++) r *= base;
-  return r;
-};
 
 /** HP multiplier for enemies of the current wave. */
 function hpScale(sim: Sim): number {
@@ -205,7 +219,7 @@ function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
   const def = ENEMIES[kind];
   const hp = def.hp * hpScale(sim);
   const e: Enemy = {
-    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, status: freshStatus(), gold: def.gold,
+    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: def.gold,
   };
   sim.enemies.push(e);
   return e;
@@ -294,9 +308,10 @@ function applyActionInner(sim: Sim, a: Action, ev: SimEvent[]): boolean {
       const m = mageOn(sim, a.tile);
       return m !== undefined && castActive(sim, m, a.target, ev);
     }
-    // trap and spell: Task 7.
-    default:
-      return false;
+    case "trap":
+      return placeTrap(sim, a.trap, a.tile, ev);
+    case "spell":
+      return castSpell(sim, a.spell, a.target, ev);
   }
 }
 
@@ -330,7 +345,7 @@ function terrainFactor(sim: Sim, e: Enemy): number {
 function moveEnemies(sim: Sim): void {
   for (const e of sim.enemies) {
     if (e.status.freezeT > 0 || e.status.stunT > 0) continue;
-    e.d = wallStop(sim, e, e.d + (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ);
+    e.d = trapStop(sim, e, wallStop(sim, e, e.d + (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ));
   }
 }
 
@@ -366,7 +381,7 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
  *  2. build break countdown; at 0 the next wave starts
  *  3. spawn due enemies
  *  4. status ticks (burn, poison, timers), mage combat (meters charge here), zones
- *     (lava, blizzard, plague, charged ground, walls, tornadoes); later tasks: traps/hazards, boss abilities
+ *     (lava, blizzard, plague, charged ground, walls, tornadoes); traps and spell cooldowns; later tasks: boss abilities
  *  5. reap enemies at 0 HP
  *  6. move enemies
  *  7. leaks
@@ -395,7 +410,9 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
   // Zones run after status timers, so the slow/no-heal they keep up (1 tick) holds for
   // the rest of this tick, and before movement, so walls block it.
   zoneTick(sim, ev);
-  // Tasks 7-8 add here: trap and spell hazards, shaman/boss abilities.
+  // Traps trigger and wear down after the zones and before movement, so a barricade holds this tick's step.
+  hazardTick(sim, ev);
+  // Task 8 adds here: shaman/boss abilities.
 
   reapDead(sim, ev);
   moveEnemies(sim);

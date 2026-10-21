@@ -4,7 +4,7 @@
 import { ACTIVES, BOSS_STUN, ENEMIES, MAGES, PASSIVES, TICK_HZ, secs } from "./data";
 import { applyBurn, damage, dist, mageById, mageStats } from "./combat";
 import { pathLength, pathPoint } from "./map";
-import type { Enemy, Mage, Sim, SimEvent, Zone } from "./sim";
+import type { Enemy, Mage, Sim, SimEvent, Trap, Zone } from "./sim";
 
 /**
  * Casts run in the action phase, before statusTick counts timers down on the
@@ -20,7 +20,7 @@ function stun(e: Enemy, s: number): void {
   e.status.stunT = Math.max(e.status.stunT, stunTicks(e, s) + CAST_LEAD);
 }
 
-function freeze(e: Enemy, s: number): void {
+export function freeze(e: Enemy, s: number): void {
   e.status.freezeT = Math.max(e.status.freezeT, stunTicks(e, s) + CAST_LEAD);
 }
 
@@ -209,9 +209,18 @@ function zoneEffect(sim: Sim, z: Zone, ev: SimEvent[]): void {
   }
 }
 
-/** Where a ground enemy moving from `e.d` to `to` stops: at a rock wall it has not passed yet. */
+/** Moving from `e.d` to `to` stops at the blocker `at` if it has not been passed yet. */
+export function stopAt(e: Enemy, to: number, at: number): number {
+  return e.d <= at && to > at ? at : to;
+}
+
+/** Ground enemies are held at the near edge of a barricade tile. */
+export const barricadeStop = (sim: Sim, t: Trap): number => (sim.map.tiles[t.tile] as { order: number }).order - 0.5;
+
+/** Where a ground enemy moving from `e.d` to `to` stops: at a rock wall or a barricade it has not passed yet. */
 export function wallStop(sim: Sim, e: Enemy, to: number): number {
   if (ENEMIES[e.kind].flying) return to;
-  for (const z of sim.zones) if (z.kind === "wall" && e.d <= z.d && to > z.d) to = z.d;
+  for (const z of sim.zones) if (z.kind === "wall") to = stopAt(e, to, z.d);
+  for (const t of sim.traps) if (t.kind === "barricade") to = stopAt(e, to, barricadeStop(sim, t));
   return to;
 }
