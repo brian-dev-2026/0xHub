@@ -165,7 +165,7 @@ function parseAction(x: unknown, maxT: number): Action | string {
  * the sim refuses, and games that do not finish within the mode's tick limit.
  */
 export function verifyRun(cfg: SimConfig, actions: unknown): { ok: true; outcome: Outcome } | { ok: false; error: string } {
-  if (cfg.__noLeak) return { ok: false, error: "test-only config" };
+  if ("__noLeak" in cfg) return { ok: false, error: "test-only config" };
   if (!Array.isArray(actions)) return { ok: false, error: "actions must be an array" };
   if (actions.length > MAX_ACTIONS) return { ok: false, error: "too many actions" };
   const maxTicks = maxTicksFor(cfg);

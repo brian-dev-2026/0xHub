@@ -41,7 +41,7 @@ export function unlocked(p: Progress): Unlocked {
   return u;
 }
 
-/** Returns why a run may not start, or null when it may. `team` is untrusted input. Endless ignores `stage`. */
+/** Returns why a run may not start, or null when it may. `team` is untrusted input: exactly min(5, unlocked mages) distinct unlocked mages. Endless ignores `stage`. */
 export function checkStart(p: Progress, mode: "stage" | "endless", stage: number, team: unknown): string | null {
   const u = unlocked(p);
   if (mode === "endless") {
@@ -50,10 +50,11 @@ export function checkStart(p: Progress, mode: "stage" | "endless", stage: number
     if (!u.stages.includes(stage)) return "stage is locked";
   } else return "unknown mode";
 
-  if (!Array.isArray(team) || team.length < 1 || team.length > TEAM_SIZE) return `team must have 1 to ${TEAM_SIZE} mages`;
+  // Five of the unlocked mages, or all of them while fewer than five are unlocked.
+  const size = Math.min(TEAM_SIZE, u.mages.length);
+  if (!Array.isArray(team) || team.length !== size) return `team must have ${size} mages`;
   if (!team.every((m) => typeof m === "string" && (u.mages as string[]).includes(m))) return "team has a locked or unknown mage";
   if (new Set(team).size !== team.length) return "team has the same mage twice";
-  if (u.mages.length >= TEAM_SIZE && team.length !== TEAM_SIZE) return `team must have ${TEAM_SIZE} mages`;
   return null;
 }
 

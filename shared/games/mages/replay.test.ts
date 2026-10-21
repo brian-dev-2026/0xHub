@@ -182,41 +182,39 @@ describe("mage siege replay", () => {
     const sim = createSim(stageCfg());
     const ranked = rankedTiles(sim);
     const pathTile = sim.map.path[5];
-    const bad = (actions: unknown, cfg = stageCfg()) => {
-      const v = verifyRun(cfg, actions);
-      expect(v.ok).toBe(false);
-      if (!v.ok) expect(typeof v.error).toBe("string");
+    const bad = (error: string, actions: unknown, cfg = stageCfg()) => {
+      expect(verifyRun(cfg, actions)).toEqual({ ok: false, error });
     };
 
     it("non-arrays and malformed actions", () => {
-      bad(null);
-      bad({ length: 0 });
-      bad("[]");
-      bad([null]);
-      bad([[]]);
-      bad([{ t: 0, type: "dance" }]);
-      bad([{ t: 0.5, type: "startWave" }]);
-      bad([{ t: -1, type: "startWave" }]);
-      bad([{ t: "0", type: "startWave" }]);
-      bad([{ t: 0, type: "place", mage: "fire", tile: 144 }]);
-      bad([{ t: 0, type: "place", mage: "fire", tile: 1.5 }]);
-      bad([{ t: 0, type: "place", mage: "dragon", tile: ranked[0] }]);
-      bad([{ t: 0, type: "merge", from: 1 }]);
-      bad([{ t: 0, type: "cast", tile: 1, target: -1 }]);
-      bad([{ t: 0, type: "trap", trap: "tar", tile: pathTile }]);
-      bad([{ t: 0, type: "spell", spell: "nuke" }]);
+      bad("actions must be an array", null);
+      bad("actions must be an array", { length: 0 });
+      bad("actions must be an array", "[]");
+      bad("action is not an object", [null]);
+      bad("action is not an object", [[]]);
+      bad("unknown action type", [{ t: 0, type: "dance" }]);
+      bad("bad action tick", [{ t: 0.5, type: "startWave" }]);
+      bad("bad action tick", [{ t: -1, type: "startWave" }]);
+      bad("bad action tick", [{ t: "0", type: "startWave" }]);
+      bad("bad place action", [{ t: 0, type: "place", mage: "fire", tile: 144 }]);
+      bad("bad place action", [{ t: 0, type: "place", mage: "fire", tile: 1.5 }]);
+      bad("bad place action", [{ t: 0, type: "place", mage: "dragon", tile: ranked[0] }]);
+      bad("bad merge action", [{ t: 0, type: "merge", from: 1 }]);
+      bad("bad cast action", [{ t: 0, type: "cast", tile: 1, target: -1 }]);
+      bad("bad trap action", [{ t: 0, type: "trap", trap: "tar", tile: pathTile }]);
+      bad("bad spell action", [{ t: 0, type: "spell", spell: "nuke" }]);
     });
 
     it("unsorted t", () => {
-      bad([...win.actions.slice(0, 5), { t: 0, type: "startWave" }, ...win.actions.slice(5)]);
+      bad("actions out of order", [...win.actions.slice(0, 5), { t: 0, type: "startWave" }, ...win.actions.slice(5)]);
     });
 
     it("20,001 actions", () => {
-      bad(Array.from({ length: 20_001 }, () => ({ t: 0, type: "startWave" })));
+      bad("too many actions", Array.from({ length: 20_001 }, () => ({ t: 0, type: "startWave" })));
     });
 
     it("merging mismatched mages", () => {
-      bad([
+      bad("illegal action", [
         { t: 0, type: "place", mage: "fire", tile: ranked[0] },
         { t: 0, type: "place", mage: "ice", tile: ranked[1] },
         { t: 1, type: "merge", from: ranked[0], to: ranked[1] },
@@ -225,25 +223,27 @@ describe("mage siege replay", () => {
     });
 
     it("placing a mage not in the team", () => {
-      bad([{ t: 0, type: "place", mage: "earth", tile: ranked[0] }, { t: 1, type: "startWave" }]);
+      bad("illegal action", [{ t: 0, type: "place", mage: "earth", tile: ranked[0] }, { t: 1, type: "startWave" }]);
     });
 
     it("casting an uncharged skill", () => {
-      bad([{ t: 0, type: "place", mage: "fire", tile: ranked[0] }, { t: 1, type: "cast", tile: ranked[0], target: pathTile }, { t: 2, type: "startWave" }]);
+      bad("illegal action", [{ t: 0, type: "place", mage: "fire", tile: ranked[0] }, { t: 1, type: "cast", tile: ranked[0], target: pathTile }, { t: 2, type: "startWave" }]);
     });
 
     it("actions after the game ended", () => {
-      bad([...win.actions, { t: win.sim.tick + 10, type: "startWave" }]);
+      bad("illegal action", [...win.actions, { t: win.sim.tick + 10, type: "startWave" }]);
     });
 
     it("an unfinished game", () => {
       // Wave 1 never starts, so the game never ends.
-      bad([]);
-      bad([{ t: 0, type: "place", mage: "fire", tile: ranked[0] }]);
+      bad("game did not finish", []);
+      bad("game did not finish", [{ t: 0, type: "place", mage: "fire", tile: ranked[0] }]);
     });
 
     it("a test-only config", () => {
-      bad(win.actions, stageCfg({ __noLeak: true }));
+      bad("test-only config", win.actions, stageCfg({ __noLeak: true }));
+      bad("test-only config", win.actions, stageCfg({ __noLeak: false }));
+      bad("test-only config", win.actions, stageCfg({ __noLeak: undefined }));
     });
   });
 
@@ -257,7 +257,8 @@ describe("mage siege replay", () => {
     if (v.ok) expect(v.outcome).toMatchObject({ won: false, wavesCleared: 7, lives: 0, stars: 0, score: 704 });
   });
 
-  it("endless replay cost", { timeout: 120_000 }, () => {
+  // Slow (about 15 s): run with MAGES_COST=1 npx vitest run shared/games/mages/replay.test.ts -t "replay cost"
+  it.skipIf(!process.env.MAGES_COST)("endless replay cost", { timeout: 120_000 }, () => {
     const cfg = endlessCfg({ __noLeak: true });
     const run = play(cfg, { buy: ["fire", "lightning", "ice", "earth", "poison"], maxMages: 15, trap: "spike", maxTraps: 6, meteor: true }, { untilWave: 100 });
     expect(run.sim.wave).toBe(100);

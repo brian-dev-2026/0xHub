@@ -32,27 +32,29 @@ describe("mage siege progress", () => {
 
     it("accepts a valid start", () => {
       expect(checkStart(fresh(), "stage", 1, ["fire", "ice", "lightning"])).toBeNull();
-      expect(checkStart(fresh(), "stage", 1, ["fire"])).toBeNull();
       expect(checkStart(six, "endless", 0, ["fire", "ice", "lightning", "earth", "wind"])).toBeNull();
       expect(checkStart(six, "stage", 5, ["fire", "ice", "lightning", "earth", "poison"])).toBeNull();
     });
 
     it("rejects a locked stage or mode", () => {
-      expect(checkStart(fresh(), "stage", 3, ["fire"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 6, ["fire"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 1.5, ["fire"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "endless", 1, ["fire"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "campaign" as never, 1, ["fire"])).toEqual(expect.any(String));
+      expect(checkStart(fresh(), "stage", 3, ["fire", "ice", "lightning"])).toBe("stage is locked");
+      expect(checkStart(fresh(), "stage", 6, ["fire", "ice", "lightning"])).toBe("stage is locked");
+      expect(checkStart(fresh(), "stage", 1.5, ["fire", "ice", "lightning"])).toBe("stage is locked");
+      expect(checkStart(fresh(), "endless", 1, ["fire", "ice", "lightning"])).toBe("Endless is locked");
+      expect(checkStart(fresh(), "campaign" as never, 1, ["fire", "ice", "lightning"])).toBe("unknown mode");
     });
 
     it("rejects bad teams", () => {
-      expect(checkStart(fresh(), "stage", 1, ["fire", "earth"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 1, ["fire", "fire"])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 1, [])).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 1, "fire")).toEqual(expect.any(String));
-      expect(checkStart(fresh(), "stage", 1, [1])).toEqual(expect.any(String));
-      expect(checkStart(six, "stage", 1, ["fire", "ice", "lightning", "earth"])).toEqual(expect.any(String));
-      expect(checkStart(six, "stage", 1, ["fire", "ice", "lightning", "earth", "poison", "wind"])).toEqual(expect.any(String));
+      expect(checkStart(fresh(), "stage", 1, ["fire"])).toBe("team must have 3 mages");
+      expect(checkStart(fresh(), "stage", 1, ["fire", "ice"])).toBe("team must have 3 mages");
+      expect(checkStart(fresh(), "stage", 1, ["fire", "ice", "earth"])).toBe("team has a locked or unknown mage");
+      expect(checkStart(fresh(), "stage", 1, ["fire", "fire", "ice"])).toBe("team has the same mage twice");
+      expect(checkStart(six, "stage", 1, ["fire", "ice", "lightning", "earth", "earth"])).toBe("team has the same mage twice");
+      expect(checkStart(fresh(), "stage", 1, [])).toBe("team must have 3 mages");
+      expect(checkStart(fresh(), "stage", 1, "fire")).toBe("team must have 3 mages");
+      expect(checkStart(fresh(), "stage", 1, [1, 2, 3])).toBe("team has a locked or unknown mage");
+      expect(checkStart(six, "stage", 1, ["fire", "ice", "lightning", "earth"])).toBe("team must have 5 mages");
+      expect(checkStart(six, "stage", 1, ["fire", "ice", "lightning", "earth", "poison", "wind"])).toBe("team must have 5 mages");
     });
   });
 
