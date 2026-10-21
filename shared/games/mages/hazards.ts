@@ -2,10 +2,10 @@
 // gold and recharge. Deterministic; all damage goes through damage() with no mage
 // credited, and freezes reuse the actives' helper so tick semantics match.
 
-import { ENEMIES, MAX_TRAPS, W, METEOR_STAGE_SCALE, SPELLS, TICK_HZ, TRAPS, TRAP_STAGE_SCALE, secs, type SpellId, type TrapId } from "./data";
+import { MAX_TRAPS, W, enemyDef, METEOR_STAGE_SCALE, SPELLS, TICK_HZ, TRAPS, TRAP_STAGE_SCALE, secs, type SpellId, type TrapId } from "./data";
 import { barricadeStop, freeze } from "./actives";
-import { damage, dist } from "./combat";
-import { pathLength, pathPoint } from "./map";
+import { damage, enemyWithin } from "./combat";
+import { pathPoint } from "./map";
 import type { Enemy, Sim, SimEvent, Trap } from "./sim";
 
 /** base^n for a whole n >= 0 (Math.pow is not deterministic across engines). */
@@ -25,20 +25,16 @@ const BRUTE_REACH = 1;
 const BRUTE_MIN_GAP = 0.5;
 const BRUTE_DUR_MULT = 3;
 
-const isGround = (e: Enemy): boolean => !ENEMIES[e.kind].flying;
+const isGround = (e: Enemy): boolean => !enemyDef(e).flying;
 const durMult = (e: Enemy): number => (e.kind === "brute" ? BRUTE_DUR_MULT : 1);
 const orderOf = (sim: Sim, t: Trap): number => (sim.map.tiles[t.tile] as { order: number }).order;
 
 /** Path tile order an enemy is on: the nearest tile centre. */
-const tileOrder = (sim: Sim, e: Enemy): number => Math.min(pathLength(sim.map), Math.max(0, Math.floor(e.d + 0.5)));
+const tileOrder = (sim: Sim, e: Enemy): number => Math.min(sim.map.path.length - 1, Math.max(0, Math.floor(e.d + 0.5)));
 
 /** Living enemies within `r` tiles of the point (cx, cy), measured to their path points. */
 function within(sim: Sim, cx: number, cy: number, r: number, groundOnly: boolean): Enemy[] {
-  return sim.enemies.filter((e) => {
-    if (e.hp <= 0 || (groundOnly && !isGround(e))) return false;
-    const p = pathPoint(sim.map, e.d);
-    return dist(cx, cy, p.x, p.y) <= r;
-  });
+  return sim.enemies.filter((e) => e.hp > 0 && (!groundOnly || isGround(e)) && enemyWithin(sim, e, cx, cy, r));
 }
 
 /** Buys a trap and puts it on an empty path tile. Rejects (changes nothing) when not allowed. */
@@ -139,19 +135,23 @@ function trigger(sim: Sim, t: Trap, entrants: Enemy[], ev: SimEvent[]): void {
  * (held enemies) and any trap a brute is attacking; removes broken traps.
  */
 export function hazardTick(sim: Sim, ev: SimEvent[]): void {
-  for (const k of Object.keys(sim.spellCd) as SpellId[]) if (sim.spellCd[k] > 0) sim.spellCd[k]--;
+  const cd = sim.spellCd;
+  for (const k in cd) if (cd[k as SpellId] > 0) cd[k as SpellId]--;
 
-  // Ground enemies that moved onto a new tile since the last tick.
-  const entered = new Map<Enemy, number>();
+  // Ground enemies that moved onto a new tile since the last tick, in board order.
+  const entered: Enemy[] = [];
   for (const e of sim.enemies) {
     const o = tileOrder(sim, e);
     if (o === e.order) continue;
     e.order = o;
-    if (isGround(e) && e.hp > 0) entered.set(e, o);
+    if (isGround(e) && e.hp > 0) entered.push(e);
   }
-  for (const t of [...sim.traps]) {
+  // With no traps, nothing below has any effect.
+  if (sim.traps.length === 0) return;
+  for (const t of sim.traps.slice()) {
     const o = orderOf(sim, t);
-    const entrants = [...entered].filter(([e, n]) => n === o && e.hp > 0).map(([e]) => e);
+    // e.order still holds the tile entered: nothing below changes it.
+    const entrants = entered.filter((e) => e.order === o && e.hp > 0);
     if (entrants.length === 0) continue;
     trigger(sim, t, entrants, ev);
     if (t.dur <= DUR_EPS) breakTrap(sim, t, ev);
@@ -160,13 +160,14 @@ export function hazardTick(sim: Sim, ev: SimEvent[]): void {
   // Wear: barricade-held enemies and brutes attacking a trap.
   const wear = new Map<Trap, number>();
   const hurt = (t: Trap, mult: number): void => void wear.set(t, (wear.get(t) ?? 0) + mult / TICK_HZ);
+  const barricades = sim.traps.some((t) => t.kind === "barricade");
   for (const e of sim.enemies) {
     if (e.hp <= 0 || !isGround(e) || e.status.freezeT > 0 || e.status.stunT > 0) continue;
     const target = bruteTarget(sim, e);
     if (target) hurt(target, BRUTE_DUR_MULT);
-    else for (const t of sim.traps) if (t.kind === "barricade" && e.d === barricadeStop(sim, t)) hurt(t, durMult(e));
+    else if (barricades) for (const t of sim.traps) if (t.kind === "barricade" && e.d === barricadeStop(sim, t)) hurt(t, durMult(e));
   }
-  for (const t of [...sim.traps]) {
+  for (const t of sim.traps.slice()) {
     const w = wear.get(t);
     if (w === undefined) continue;
     t.dur -= w;

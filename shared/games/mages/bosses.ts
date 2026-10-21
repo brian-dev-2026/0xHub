@@ -3,8 +3,8 @@
 // tick from step(), after the zones (so a plague cloud's no-heal already holds) and
 // before reaping and movement. Damage-side effects stay in combat.ts.
 
-import { ABILITIES as A, ENEMIES, W, secs } from "./data";
-import { dist } from "./combat";
+import { ABILITIES as A, ENEMIES, W, enemyDef, secs } from "./data";
+import { dist, enemyWithin } from "./combat";
 import { pathLength, pathPoint } from "./map";
 import { stunMage } from "./actives";
 import { spawnEnemy, type Enemy, type Sim, type SimEvent } from "./sim";
@@ -53,11 +53,7 @@ function heal(e: Enemy, amount: number): boolean {
 /** Living enemies (the caster included) within `r` tiles of `c`, in spawn order. */
 function within(sim: Sim, c: Enemy, r: number): Enemy[] {
   const cp = pathPoint(sim.map, c.d);
-  return sim.enemies.filter((o) => {
-    if (o.hp <= 0) return false;
-    const p = pathPoint(sim.map, o.d);
-    return dist(cp.x, cp.y, p.x, p.y) <= r;
-  });
+  return sim.enemies.filter((o) => o.hp > 0 && enemyWithin(sim, o, cp.x, cp.y, r));
 }
 
 /** True when the skill is due on this tick; moves it one period on. */
@@ -67,17 +63,24 @@ function due(sim: Sim, e: Enemy, key: "nextSkill" | "nextSlam" | "nextHeal", per
   return true;
 }
 
+type Skill = Extract<SimEvent, { type: "bossSkill" }>["skill"];
+const noteSkill = (ev: SimEvent[], e: Enemy, skill: Skill, targets: number[]): void => {
+  ev.push({ type: "bossSkill", enemy: e.id, skill, targets });
+};
+
 export function enemyAbilities(sim: Sim, ev: SimEvent[]): void {
-  for (const e of [...sim.enemies]) {
-    if (e.hp <= 0 || !sim.enemies.includes(e)) continue;
-    const note = (skill: Extract<SimEvent, { type: "bossSkill" }>["skill"], targets: number[]): void => {
-      ev.push({ type: "bossSkill", enemy: e.id, skill, targets });
-    };
+  // A copy: enemies spawned here act from the next tick.
+  const list = sim.enemies.slice();
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    // Only the shaman and the bosses have a case below, so the rest are skipped first. Still on
+    // the board? Spawns only append, so an unmoved index answers without a search.
+    if (e.hp <= 0 || (enemyDef(e).boss === null && e.kind !== "shaman") || (sim.enemies[i] !== e && !sim.enemies.includes(e))) continue;
     switch (e.kind) {
       case "shaman":
         if (due(sim, e, "nextSkill", A.shamanHealSecs) && canHeal(e)) {
           const healed = within(sim, e, A.shamanHealRadius).filter((o) => heal(o, o.maxHp * A.shamanHealPct));
-          if (healed.length > 0) note("heal", healed.map((o) => o.id));
+          if (healed.length > 0) noteSkill(ev, e, "heal", healed.map((o) => o.id));
         }
         break;
       case "goblinChief":
@@ -88,37 +91,37 @@ export function enemyAbilities(sim: Sim, ev: SimEvent[]): void {
             goblins.push(g.id);
             ev.push({ type: "spawn", enemy: g.id });
           }
-          note("summon", goblins);
+          noteSkill(ev, e, "summon", goblins);
         }
         break;
       case "direWolf":
         if (due(sim, e, "nextSkill", A.wolfSprintEverySecs)) {
           e.abil.sprintT = secs(A.wolfSprintSecs);
-          note("sprint", [e.id]);
+          noteSkill(ev, e, "sprint", [e.id]);
         }
         e.speed = ENEMIES.direWolf.speed * (e.abil.sprintT > 0 ? A.wolfSprintSpeed : 1);
         if (e.abil.sprintT > 0) e.abil.sprintT--;
         break;
       case "troll":
         if (due(sim, e, "nextSkill", A.trollRegenSecs) && e.status.burnT <= 0 && e.status.poison.t <= 0 && heal(e, e.maxHp * A.trollRegenPct))
-          note("regen", [e.id]);
+          noteSkill(ev, e, "regen", [e.id]);
         break;
       case "witch":
         if (due(sim, e, "nextSkill", A.witchShieldEverySecs)) {
           const shielded = within(sim, e, A.witchShieldRadius);
           // statusTick counts shieldT down before any damage, so +1 shields the next secs(S) ticks.
           for (const o of shielded) o.status.shieldT = Math.max(o.status.shieldT, secs(A.witchShieldSecs) + 1);
-          note("shield", shielded.map((o) => o.id));
+          noteSkill(ev, e, "shield", shielded.map((o) => o.id));
         }
         break;
       case "treant":
-        treant(sim, e, ev, note);
+        treant(sim, e, ev);
         break;
     }
   }
 }
 
-function treant(sim: Sim, e: Enemy, ev: SimEvent[], note: (skill: "saplings" | "rootSlam" | "heal", targets: number[]) => void): void {
+function treant(sim: Sim, e: Enemy, ev: SimEvent[]): void {
   if (due(sim, e, "nextSkill", A.treantPlantSecs)) {
     const last = pathLength(sim.map) - A.saplingEndMargin;
     const ids: number[] = [];
@@ -128,18 +131,18 @@ function treant(sim: Sim, e: Enemy, ev: SimEvent[], note: (skill: "saplings" | "
       ids.push(s.id);
       ev.push({ type: "spawn", enemy: s.id });
     }
-    note("saplings", ids);
+    noteSkill(ev, e, "saplings", ids);
   }
   if (due(sim, e, "nextHeal", A.treantHealSecs)) {
     const n = sim.enemies.filter((o) => o.owner === e.id && o.hp > 0).length;
-    if (n > 0 && heal(e, e.maxHp * A.treantHealPctPerSapling * n)) note("heal", [e.id]);
+    if (n > 0 && heal(e, e.maxHp * A.treantHealPctPerSapling * n)) noteSkill(ev, e, "heal", [e.id]);
   }
   if (due(sim, e, "nextSlam", A.treantSlamSecs)) {
     const c = pathPoint(sim.map, e.d);
     const away = (m: { tile: number }): number => dist((m.tile % W) + 0.5, Math.floor(m.tile / W) + 0.5, c.x, c.y);
     const hit = [...sim.mages].sort((a, b) => away(a) - away(b) || a.id - b.id).slice(0, A.treantSlamTargets);
     for (const m of hit) stunMage(m, A.treantSlamStunSecs);
-    note("rootSlam", hit.map((m) => m.id));
+    noteSkill(ev, e, "rootSlam", hit.map((m) => m.id));
   }
   const enraged = e.hp < e.maxHp * A.treantEnrageBelow;
   e.speed = ENEMIES.treant.speed * (enraged ? A.treantEnrageSpeed : 1);

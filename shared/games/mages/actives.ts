@@ -1,8 +1,8 @@
 // Mage Siege active skills: tap-to-cast actives and the zones they leave on the
 // path. Deterministic (no Math.pow/sin/cos); all damage goes through damage().
 
-import { ACTIVES, ENEMIES, MAGES, PASSIVES, TICK_HZ, secs } from "./data";
-import { applyBurn, damage, dist, mageById, mageStats, stunTicks } from "./combat";
+import { ACTIVES, MAGES, PASSIVES, TICK_HZ, enemyDef, secs } from "./data";
+import { IGNORE_ARMOR, applyBurn, damage, enemyWithin, mageById, mageStats, stunTicks } from "./combat";
 import { pathLength, pathPoint } from "./map";
 import type { Enemy, Mage, Sim, SimEvent, Trap, Zone } from "./sim";
 
@@ -34,11 +34,7 @@ export function freeze(e: Enemy, s: number): void {
 /** Living enemies within `r` tiles (Euclidean between path points) of path position `d`. */
 function around(sim: Sim, d: number, r: number): Enemy[] {
   const c = pathPoint(sim.map, d);
-  return sim.enemies.filter((e) => {
-    if (e.hp <= 0) return false;
-    const p = pathPoint(sim.map, e.d);
-    return dist(c.x, c.y, p.x, p.y) <= r;
-  });
+  return sim.enemies.filter((e) => e.hp > 0 && enemyWithin(sim, e, c.x, c.y, r));
 }
 
 /** `n` consecutive path orders centred on `o` (an even count leans forward), shifted to stay on the path. */
@@ -106,11 +102,7 @@ export function castActive(sim: Sim, m: Mage, target: number | undefined, ev: Si
       const my = Math.floor(m.tile / 16) + 0.5;
       const reach = mageStats(sim, m).range * ACTIVES.thunderRange;
       const struck = sim.enemies
-        .filter((e) => {
-          if (e.hp <= 0) return false;
-          const p = pathPoint(sim.map, e.d);
-          return dist(mx, my, p.x, p.y) <= reach;
-        })
+        .filter((e) => e.hp > 0 && enemyWithin(sim, e, mx, my, reach))
         .sort((a, b) => b.d - a.d)
         .slice(0, value);
       note(struck);
@@ -151,7 +143,7 @@ export function castActive(sim: Sim, m: Mage, target: number | undefined, ev: Si
  * Zone damage is per tick and ignores armor, like burn and venom.
  */
 export function zoneTick(sim: Sim, ev: SimEvent[]): void {
-  sim.zones = sim.zones.filter((z) => z.t > 0);
+  if (sim.zones.some((z) => z.t <= 0)) sim.zones = sim.zones.filter((z) => z.t > 0);
   for (const z of sim.zones) {
     zoneEffect(sim, z, ev);
     z.t--;
@@ -160,7 +152,7 @@ export function zoneTick(sim: Sim, ev: SimEvent[]): void {
 
 function zoneEffect(sim: Sim, z: Zone, ev: SimEvent[]): void {
   const by = mageById(sim, z.owner);
-  const hurt = (e: Enemy, perSec: number): void => damage(sim, e, (z.dmg * perSec) / TICK_HZ, by, ev, { ignoreArmor: true });
+  const hurt = (e: Enemy, perSec: number): void => damage(sim, e, (z.dmg * perSec) / TICK_HZ, by, ev, IGNORE_ARMOR);
   switch (z.kind) {
     case "lava":
       for (const e of around(sim, z.d, z.r)) applyBurn(e, z.dmg * (MAGES.fire.passive[z.level - 1] / 100), z.dmg, z.level, z.owner);
@@ -200,10 +192,10 @@ function zoneEffect(sim: Sim, z: Zone, ev: SimEvent[]): void {
       if (z.t > secs(ACTIVES.tornadoSecs)) return;
       const stepD = ACTIVES.tornadoSpeed / TICK_HZ;
       for (const e of around(sim, z.d, z.r)) {
-        if (ENEMIES[e.kind].flying) continue;
+        if (enemyDef(e).flying) continue;
         hurt(e, ACTIVES.tornadoDps);
         // Bosses are immune to knockback.
-        if (e.hp <= 0 || ENEMIES[e.kind].boss !== null) continue;
+        if (e.hp <= 0 || enemyDef(e).boss !== null) continue;
         const carried = z.carried![e.id] ?? 0;
         const mv = Math.min(stepD, ACTIVES.tornadoCarry - carried);
         if (mv <= 0) continue;
@@ -226,7 +218,7 @@ export const barricadeStop = (sim: Sim, t: Trap): number => (sim.map.tiles[t.til
 
 /** Where a ground enemy moving from `e.d` to `to` stops: at a rock wall or a barricade it has not passed yet. */
 export function wallStop(sim: Sim, e: Enemy, to: number): number {
-  if (ENEMIES[e.kind].flying) return to;
+  if (enemyDef(e).flying) return to;
   for (const z of sim.zones) if (z.kind === "wall") to = stopAt(e, to, z.d);
   for (const t of sim.traps) if (t.kind === "barricade") to = stopAt(e, to, barricadeStop(sim, t));
   return to;

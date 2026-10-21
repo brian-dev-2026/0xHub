@@ -50,10 +50,12 @@ export type SimSnapshot = Omit<Sim, "map" | "rng" | "combatRng"> & { rng: number
 /** Plain-JSON copy of the sim's state (shares nothing with `sim`). */
 export function serializeSim(sim: Sim): SimSnapshot {
   // Fields are listed one by one so anything else on a Sim (a cache) never reaches the snapshot.
+  const enemies = sim.enemies.map(({ def, pos, ...e }) => e);
+  const mages = sim.mages.map(({ statsFor, ...m }) => m);
   const snap: SimSnapshot = {
     cfg: sim.cfg, tick: sim.tick, phase: sim.phase, wave: sim.wave, breakT: sim.breakT, phaseTick: sim.phaseTick,
     wavesCleared: sim.wavesCleared, livesAtClear: sim.livesAtClear, gold: sim.gold, lives: sim.lives, purchases: sim.purchases,
-    mages: sim.mages, enemies: sim.enemies, spawnQueue: sim.spawnQueue, nextId: sim.nextId, rejected: sim.rejected, kills: sim.kills,
+    mages, enemies, spawnQueue: sim.spawnQueue, nextId: sim.nextId, rejected: sim.rejected, kills: sim.kills,
     shatter: sim.shatter, zones: sim.zones, traps: sim.traps, spellCd: sim.spellCd,
     rng: sim.rng.state(), combatRng: sim.combatRng.state(),
   };

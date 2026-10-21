@@ -4,12 +4,12 @@
 
 import {
   BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
-  type EnemyId, type MageId, type SpellId, type TrapId,
+  enemyDef, type EnemyDef, type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
 import { castActive, wallStop, zoneTick } from "./actives";
 import { enemyAbilities, freshAbilities, type Abilities } from "./bosses";
 import { castSpell, hazardTick, placeTrap, powi, trapStop } from "./hazards";
-import { combatTick, killEnemy, magePrice, refreshShatter, statusTick } from "./combat";
+import { combatTick, killEnemy, magePrice, refreshShatter, statusTick, type MageStats } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
 import { STAGE_WAVES, endlessWave, type Group } from "./waves";
@@ -74,6 +74,13 @@ export interface Enemy {
   abil: Abilities;
   /** Saplings only: id of the Treant that planted it. */
   owner?: number;
+  /**
+   * Performance caches, not game state (never hashed or serialized): the kind's
+   * definition, and [d, x, y]: the path point at position d (see enemyPos in combat.ts), reused
+   * until the enemy moves (a typed array, so updating it does not allocate).
+   */
+  def?: EnemyDef;
+  pos?: Float64Array;
 }
 
 /**
@@ -106,6 +113,8 @@ export interface Mage {
   stunT: number;
   /** Gold spent on this mage, including merged-in mages. */
   spent: number;
+  /** Performance cache, not game state (never hashed or serialized): stats for this level, tile and terrain. */
+  statsFor?: { level: number; tile: number; terrain: string; stats: MageStats; reach: number[] };
 }
 
 /** A trap on a path tile; `dur` is its durability left (it breaks at 0). */
@@ -237,6 +246,7 @@ export function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
   const hp = def.hp * hpScale(sim);
   const e: Enemy = {
     id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: def.gold, abil: freshAbilities(kind, sim.tick),
+    def, pos: undefined,
   };
   sim.enemies.push(e);
   return e;
@@ -342,14 +352,16 @@ function spawnDue(sim: Sim, ev: SimEvent[]): void {
 
 /** Kills enemies left at 0 HP by something other than damage() (e.g. test hooks). */
 function reapDead(sim: Sim, ev: SimEvent[]): void {
-  for (const e of sim.enemies.filter((x) => x.hp <= 0)) killEnemy(sim, e, null, ev);
+  let any = false;
+  for (const e of sim.enemies) if (e.hp <= 0) any = true;
+  if (any) for (const e of sim.enemies.filter((x) => x.hp <= 0)) killEnemy(sim, e, null, ev);
 }
 
 const BRIDGE_SPEED = 0.5;
 
 /** Speed multiplier from the path tile the enemy is over (the nearest tile centre). */
 function terrainFactor(sim: Sim, e: Enemy): number {
-  if (ENEMIES[e.kind].flying) return 1;
+  if (enemyDef(e).flying) return 1;
   const order = Math.min(sim.map.path.length - 1, Math.max(0, Math.floor(e.d + 0.5)));
   const tile = sim.map.tiles[sim.map.path[order]];
   if (tile.kind !== "path") return 1;
@@ -361,19 +373,29 @@ function terrainFactor(sim: Sim, e: Enemy): number {
 }
 
 function moveEnemies(sim: Sim): void {
+  // Walls and barricades are rare; without them wallStop changes nothing.
+  let blockers = false;
+  for (const z of sim.zones) if (z.kind === "wall") blockers = true;
+  for (const t of sim.traps) if (t.kind === "barricade") blockers = true;
   for (const e of sim.enemies) {
     if (e.status.freezeT > 0 || e.status.stunT > 0) continue;
-    e.d = trapStop(sim, e, wallStop(sim, e, e.d + (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ));
+    let to = e.d + (e.speed * terrainFactor(sim, e) * (1 - e.status.slow)) / TICK_HZ;
+    if (blockers) to = wallStop(sim, e, to);
+    // Only brutes stop for traps (trapStop returns `to` for anyone else).
+    e.d = e.kind === "brute" ? trapStop(sim, e, to) : to;
   }
 }
 
 /** Enemies past the exit cost lives and leave the board. */
 function leak(sim: Sim, ev: SimEvent[]): void {
   const end = pathLength(sim.map);
+  let any = false;
+  for (const e of sim.enemies) if (e.d >= end) any = true;
+  if (!any) return;
   let treantLeaked = false;
   sim.enemies = sim.enemies.filter((e) => {
     if (e.d < end) return true;
-    const lost = sim.cfg.__noLeak ? 0 : Math.min(sim.lives, ENEMIES[e.kind].leak);
+    const lost = sim.cfg.__noLeak ? 0 : Math.min(sim.lives, enemyDef(e).leak);
     sim.lives -= lost;
     if (e.kind === "treant") treantLeaked = true;
     ev.push({ type: "leak", enemy: e.id, lives: lost });

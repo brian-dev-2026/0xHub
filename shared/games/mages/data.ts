@@ -123,6 +123,9 @@ export const ENEMIES: Record<EnemyId, EnemyDef> = {
   sapling: enemy(200, 0, 0, 0, false, null, 0),
 };
 
+/** ENEMIES[e.kind], cached on the enemy (keyed lookups by kind are slow in the hot loops). */
+export const enemyDef = (e: { kind: EnemyId; def?: EnemyDef }): EnemyDef => e.def ?? (e.def = ENEMIES[e.kind]);
+
 /** Secondary passive numbers (seconds, tiles, fractions); per-level arrays are indexed by level - 1. */
 export const PASSIVES = {
   /** Fire: burn lasts 3 s; from L3 it spreads on death (1 tile), at L5 the death also explodes (1 tile, 100% hit damage). */
