@@ -180,6 +180,8 @@ export const BUILD_BREAK_SECS = 12;
 export const STAGE_HP = 1.35;
 export const WAVE_HP = 1.1;
 export const ENDLESS_WAVE_HP = 1.12;
+/** Endless runs end (won) after this many waves. */
+export const ENDLESS_MAX_WAVES = 300;
 /** Spike and mine damage multiplier per stage. */
 export const TRAP_STAGE_SCALE = 1.25;
 

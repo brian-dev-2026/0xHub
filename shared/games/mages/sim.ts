@@ -3,7 +3,7 @@
 // events step() returns; gameplay changes only through actions.
 
 import {
-  BUILD_BREAK_SECS, ECON, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
+  BUILD_BREAK_SECS, ECON, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
 import { generateMap, pathLength, type GameMap } from "./map";
@@ -126,7 +126,7 @@ export function createSim(cfg: SimConfig): Sim {
 }
 
 export function totalWaves(sim: Sim): number {
-  return sim.cfg.mode === "endless" ? 300 : STAGE_WAVES[sim.cfg.stage].length;
+  return sim.cfg.mode === "endless" ? ENDLESS_MAX_WAVES : STAGE_WAVES[sim.cfg.stage].length;
 }
 
 export function stars(sim: Sim): 0 | 1 | 2 | 3 {
@@ -218,6 +218,8 @@ function reapDead(sim: Sim, ev: SimEvent[]): void {
   });
 }
 
+const BRIDGE_SPEED = 0.5;
+
 /** Speed multiplier from the path tile the enemy is over (the nearest tile centre). */
 function terrainFactor(sim: Sim, e: Enemy): number {
   if (ENEMIES[e.kind].flying) return 1;
@@ -226,6 +228,8 @@ function terrainFactor(sim: Sim, e: Enemy): number {
   if (tile.kind !== "path") return 1;
   if (tile.terrain === "mud") return TERRAIN_BOOST.mudSpeed;
   if (tile.terrain === "ice") return TERRAIN_BOOST.iceSpeed;
+  // Ground enemies bunch up on bridges (spacing halved).
+  if (tile.terrain === "bridge") return BRIDGE_SPEED;
   return 1;
 }
 
@@ -246,7 +250,8 @@ function leak(sim: Sim, ev: SimEvent[]): void {
 }
 
 function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
-  if (sim.phase !== "wave" || sim.spawnQueue.length > 0 || sim.enemies.length > 0) return;
+  // A run lost this tick gets no wave bonus.
+  if (sim.phase !== "wave" || sim.lives <= 0 || sim.spawnQueue.length > 0 || sim.enemies.length > 0) return;
   const bonus = ECON.waveBonus(sim.wave);
   sim.gold += bonus;
   ev.push({ type: "waveEnd", wave: sim.wave, bonus });
@@ -255,8 +260,12 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
 }
 
 /**
- * Advances exactly one tick. Order:
- *  1. apply this tick's actions (rejected ones count in `rejected`)
+ * Advances exactly one tick. Actions must be stamped with the tick they apply
+ * on: those with `t === sim.tick` are applied, those with `t > sim.tick` are
+ * left for later (ignored here), and those with `t < sim.tick` are stale and
+ * count in `rejected`. Pass each action to step() only until its tick.
+ * Order:
+ *  1. apply this tick's actions (rejected and stale ones count in `rejected`)
  *  2. build break countdown; at 0 the next wave starts
  *  3. spawn due enemies
  *  4. (later tasks: mage combat, status effects, traps/hazards, boss abilities)
@@ -271,7 +280,10 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
   const ev: SimEvent[] = [];
   if (sim.phase === "won" || sim.phase === "lost") return ev;
 
-  for (const a of actions) if (a.t === sim.tick && !applyAction(sim, a, ev)) sim.rejected++;
+  for (const a of actions) {
+    if (a.t < sim.tick) sim.rejected++;
+    else if (a.t === sim.tick && !applyAction(sim, a, ev)) sim.rejected++;
+  }
 
   // Before wave 1 the build phase has no timer and waits for startWave.
   if (sim.phase === "build" && sim.wave > 0 && --sim.breakT <= 0) startNextWave(sim, ev);

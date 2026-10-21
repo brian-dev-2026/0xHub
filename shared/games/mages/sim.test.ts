@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ECON, ENEMIES, TICK_HZ, secs, type PathTerrain } from "./data";
+import { ECON, ENDLESS_MAX_WAVES, ENEMIES, TICK_HZ, secs, type PathTerrain } from "./data";
 import { pathLength } from "./map";
 import { makeRng } from "./rng";
-import { createSim, spawnForTest, stars, step, type Action, type Sim, type SimConfig, type SimEvent } from "./sim";
+import { createSim, spawnForTest, stars, step, totalWaves, type Action, type Sim, type SimConfig, type SimEvent } from "./sim";
 import { STAGE_WAVES, endlessWave } from "./waves";
 
 const cfg = (over: Partial<SimConfig> = {}): SimConfig => ({
@@ -116,6 +116,44 @@ describe("mage siege simulation", () => {
     const b = spawnForTest(sim, "bat", 5);
     for (let i = 0; i < TICK_HZ; i++) step(sim, []);
     expect(b.d - 5).toBeCloseTo(1.3, 2);
+  });
+
+  it("bridge halves ground speed", () => {
+    const sim = createSim(cfg());
+    paintPath(sim, "bridge");
+    sim.phase = "wave";
+    const g = spawnForTest(sim, "goblin", 5);
+    const b = spawnForTest(sim, "bat", 5);
+    for (let i = 0; i < TICK_HZ; i++) step(sim, []);
+    expect(g.d - 5).toBeCloseTo(0.5, 2);
+    expect(b.d - 5).toBeCloseTo(1.3, 2);
+  });
+
+  it("losing on the last leak pays no wave bonus", () => {
+    const sim = createSim(cfg());
+    startWave(sim);
+    sim.spawnQueue = [];
+    sim.enemies = [];
+    sim.lives = 1;
+    const gold = sim.gold;
+    spawnForTest(sim, "goblin", pathLength(sim.map) - 0.01);
+    const ev = step(sim, []);
+    expect(ev.some((e) => e.type === "waveEnd")).toBe(false);
+    expect(ev).toContainEqual({ type: "end", won: false });
+    expect(sim.gold).toBe(gold);
+  });
+
+  it("stale actions count as rejected", () => {
+    const sim = createSim(cfg());
+    step(sim, []);
+    step(sim, [{ t: 0, type: "startWave" }, { t: 5, type: "startWave" }]);
+    expect(sim.rejected).toBe(1);
+    expect(sim.wave).toBe(0);
+  });
+
+  it("endless runs last ENDLESS_MAX_WAVES waves", () => {
+    expect(totalWaves(createSim(cfg({ mode: "endless" })))).toBe(ENDLESS_MAX_WAVES);
+    expect(totalWaves(createSim(cfg()))).toBe(10);
   });
 
   it("HP scaling", () => {
