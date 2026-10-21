@@ -2,7 +2,7 @@
 // gold and recharge. Deterministic; all damage goes through damage() with no mage
 // credited, and freezes reuse the actives' helper so tick semantics match.
 
-import { ENEMIES, MAX_TRAPS, METEOR_STAGE_SCALE, SPELLS, TICK_HZ, TRAPS, TRAP_STAGE_SCALE, secs, type SpellId, type TrapId } from "./data";
+import { ENEMIES, MAX_TRAPS, W, METEOR_STAGE_SCALE, SPELLS, TICK_HZ, TRAPS, TRAP_STAGE_SCALE, secs, type SpellId, type TrapId } from "./data";
 import { barricadeStop, freeze } from "./actives";
 import { damage, dist } from "./combat";
 import { pathLength, pathPoint } from "./map";
@@ -46,6 +46,8 @@ export function placeTrap(sim: Sim, kind: TrapId, tile: number, ev: SimEvent[]):
   const def = TRAPS[kind];
   if (!def || !sim.cfg.traps.includes(kind) || sim.gold < def.price || sim.traps.length >= MAX_TRAPS) return false;
   if (!Number.isInteger(tile) || tile < 0 || tile >= sim.map.tiles.length || sim.map.tiles[tile].kind !== "path") return false;
+  // Nothing ever enters the first path tile, so a trap there could not trigger.
+  if (sim.map.path[0] === tile) return false;
   if (sim.traps.some((t) => t.tile === tile)) return false;
   sim.gold -= def.price;
   const t: Trap = { id: sim.nextId++, kind, tile, dur: def.durability };
@@ -62,8 +64,8 @@ export function castSpell(sim: Sim, kind: SpellId, target: number | undefined, e
   sim.gold -= def.cost;
   sim.spellCd[kind] = secs(def.cooldown);
   if (kind === "meteor") {
-    const cx = (target! % 16) + 0.5;
-    const cy = Math.floor(target! / 16) + 0.5;
+    const cx = (target! % W) + 0.5;
+    const cy = Math.floor(target! / W) + 0.5;
     const dmg = def.value * powi(METEOR_STAGE_SCALE, sim.cfg.stage - 1);
     ev.push({ type: "spell", spell: kind, target });
     for (const e of within(sim, cx, cy, METEOR_RADIUS, false)) damage(sim, e, dmg, null, ev);
@@ -83,6 +85,8 @@ function bruteTarget(sim: Sim, e: Enemy): Trap | null {
   let best: Trap | null = null;
   let bestGap = Infinity;
   for (const t of sim.traps) {
+    // Brutes walk onto mines (and set them off) rather than attack them.
+    if (t.kind === "mine") continue;
     const gap = orderOf(sim, t) - e.d;
     if (gap > BRUTE_MIN_GAP && gap <= BRUTE_REACH && gap < bestGap) {
       best = t;
@@ -110,7 +114,7 @@ function trigger(sim: Sim, t: Trap, entrants: Enemy[], ev: SimEvent[]): void {
     const c = pathPoint(sim.map, orderOf(sim, t));
     const caught = within(sim, c.x, c.y, MINE_RADIUS, true);
     t.dur = 0;
-    ev.push({ type: "trapTrigger", trap: t.id, enemies: entrants.map((e) => e.id) });
+    ev.push({ type: "trapTrigger", trap: t.id, enemies: caught.map((e) => e.id) });
     for (const e of caught) damage(sim, e, def.value * scale, null, ev);
     return;
   }
@@ -157,7 +161,7 @@ export function hazardTick(sim: Sim, ev: SimEvent[]): void {
   const wear = new Map<Trap, number>();
   const hurt = (t: Trap, mult: number): void => void wear.set(t, (wear.get(t) ?? 0) + mult / TICK_HZ);
   for (const e of sim.enemies) {
-    if (e.hp <= 0 || !isGround(e)) continue;
+    if (e.hp <= 0 || !isGround(e) || e.status.freezeT > 0 || e.status.stunT > 0) continue;
     const target = bruteTarget(sim, e);
     if (target) hurt(target, BRUTE_DUR_MULT);
     else for (const t of sim.traps) if (t.kind === "barricade" && e.d === barricadeStop(sim, t)) hurt(t, durMult(e));

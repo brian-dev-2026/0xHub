@@ -54,6 +54,11 @@ describe("traps", () => {
     rejects(sim, () => placeTrap(sim, "barricade", 5));
   });
 
+  it("no trap on the first path tile", () => {
+    const sim = mk();
+    rejects(sim, () => placeTrap(sim, "spike", 0));
+  });
+
   it("max 6 traps", () => {
     const sim = mk();
     for (let i = 0; i < 6; i++) expect(placeTrap(sim, "spike", 3 + i)).toBe(true);
@@ -187,6 +192,7 @@ describe("traps", () => {
   it("mine is single use", () => {
     const sim = mk({ stage: 2 });
     placeTrap(sim, "mine", 10);
+    const id = sim.traps[0].id;
     const a = foe(sim, "goblin", 9.4);
     const near = foe(sim, "goblin", 10.6);
     const far = foe(sim, "goblin", 13);
@@ -196,11 +202,42 @@ describe("traps", () => {
     expect(near.maxHp - near.hp).toBeCloseTo(dmg, 6);
     expect(far.hp).toBe(far.maxHp);
     expect(sim.traps).toHaveLength(0);
-    expect(ev.filter((x) => x.type === "trapTrigger")).toHaveLength(1);
+    expect(ev.filter((x) => x.type === "trapTrigger")).toEqual([{ type: "trapTrigger", trap: id, enemies: [a.id, near.id] }]);
     expect(ev.filter((x) => x.type === "trapBreak")).toHaveLength(1);
     const late = foe(sim, "goblin", 8.5);
     run(sim, 100);
     expect(late.hp).toBe(late.maxHp);
+  });
+
+  it("a brute walks onto a mine and sets it off", () => {
+    const sim = mk();
+    placeTrap(sim, "mine", 10);
+    const b = foe(sim, "brute", 8.5);
+    run(sim, 120);
+    expect(sim.traps).toHaveLength(0);
+    expect(b.maxHp - b.hp).toBeGreaterThan(0);
+  });
+
+  it("frozen enemies do not wear a barricade", () => {
+    const sim = mk();
+    placeTrap(sim, "barricade", 8);
+    foe(sim, "goblin", 7.5);
+    run(sim, 2);
+    const dur = sim.traps[0].dur;
+    step(sim, [{ t: sim.tick, type: "spell", spell: "freeze" }]);
+    run(sim, secs(3) - 1);
+    expect(sim.traps[0].dur).toBe(dur);
+    run(sim, 30);
+    expect(sim.traps[0].dur).toBeLessThan(dur);
+  });
+
+  it("frozen brutes do not attack a trap", () => {
+    const sim = mk();
+    placeTrap(sim, "spike", 8);
+    const b = foe(sim, "brute", 7.2);
+    b.status.freezeT = 30;
+    run(sim, 29);
+    expect(sim.traps[0].dur).toBe(30);
   });
 
   it("bats ignore traps", () => {
