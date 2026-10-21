@@ -6,7 +6,7 @@ import {
   BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
-import { combatTick, killEnemy, magePrice, statusTick } from "./combat";
+import { combatTick, killEnemy, magePrice, refreshShatter, statusTick } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
 import { makeRng, type Rng } from "./rng";
 import { STAGE_WAVES, endlessWave, type Group } from "./waves";
@@ -43,8 +43,10 @@ export interface Status {
   /** Level of the fire mage that set the burn, and the hit damage it was based on (for death spread/explosion). */
   burnLv: number;
   burnHit: number;
-  /** `dps` is per stack; `lv` is the level of the mage that last added a stack. */
-  poison: { stacks: number; dps: number; t: number; lv: number };
+  /** Id of the mage that applied the burn. */
+  burnBy: number;
+  /** `dps` is per stack; `lv` and `by` are the level and id of the mage that last added a stack. */
+  poison: { stacks: number; dps: number; t: number; lv: number; by: number };
   shieldT: number;
   noHealT: number;
 }
@@ -81,6 +83,8 @@ export interface Sim {
   cfg: SimConfig;
   map: GameMap;
   rng: Rng;
+  /** Combat randomness (gust); separate from `rng`, which drives Endless wave generation. */
+  combatRng: Rng;
   tick: number;
   phase: "build" | "wave" | "won" | "lost";
   /** Current wave number; 0 before wave 1. */
@@ -126,6 +130,7 @@ export function createSim(cfg: SimConfig): Sim {
     cfg,
     map,
     rng: makeRng(cfg.seed ^ 0x5eed),
+    combatRng: makeRng(cfg.seed ^ 0xc0ffee),
     tick: 0,
     phase: "build",
     wave: 0,
@@ -169,8 +174,8 @@ function hpScale(sim: Sim): number {
 }
 
 const freshStatus = (): Status => ({
-  slow: 0, slowT: 0, stunT: 0, freezeT: 0, burnDps: 0, burnT: 0, burnLv: 0, burnHit: 0,
-  poison: { stacks: 0, dps: 0, t: 0, lv: 0 }, shieldT: 0, noHealT: 0,
+  slow: 0, slowT: 0, stunT: 0, freezeT: 0, burnDps: 0, burnT: 0, burnLv: 0, burnHit: 0, burnBy: 0,
+  poison: { stacks: 0, dps: 0, t: 0, lv: 0, by: 0 }, shieldT: 0, noHealT: 0,
 });
 
 function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
@@ -215,6 +220,12 @@ function isFreeBuildTile(sim: Sim, tile: number): boolean {
 
 /** Applies one action; returns false (and changes nothing) when it is not allowed now. */
 export function applyAction(sim: Sim, a: Action, ev: SimEvent[]): boolean {
+  const ok = applyActionInner(sim, a, ev);
+  if (ok) refreshShatter(sim);
+  return ok;
+}
+
+function applyActionInner(sim: Sim, a: Action, ev: SimEvent[]): boolean {
   switch (a.type) {
     case "startWave":
       // Starts wave 1, or skips the build break between waves.

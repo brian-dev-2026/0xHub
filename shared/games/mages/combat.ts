@@ -89,19 +89,14 @@ function nearest(sim: Sim, from: Enemy, list: Enemy[]): Enemy | null {
 function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
   const st = e.status;
   if (st.burnT > 0 && st.burnLv >= PASSIVES.burnSpreadLevel) {
-    const owner = sim.mages.find((m) => m.kind === "fire" && m.level === st.burnLv)?.id ?? 0;
+    const owner = mageById(sim, st.burnBy);
     const spread = near(sim, e, PASSIVES.burnSpreadRadius);
-    for (const o of spread) {
-      o.status.burnDps = st.burnDps;
-      o.status.burnT = secs(PASSIVES.burnSecs);
-      o.status.burnLv = st.burnLv;
-      o.status.burnHit = st.burnHit;
-    }
-    if (spread.length > 0) ev.push({ type: "passive", mage: owner, kind: "burnSpread", targets: spread.map((o) => o.id) });
+    for (const o of spread) applyBurn(o, st.burnDps, st.burnHit, st.burnLv, st.burnBy);
+    if (spread.length > 0) ev.push({ type: "passive", mage: st.burnBy, kind: "burnSpread", targets: spread.map((o) => o.id) });
     if (st.burnLv >= PASSIVES.explodeLevel) {
       const hit = near(sim, e, PASSIVES.explodeRadius);
-      ev.push({ type: "passive", mage: owner, kind: "explode", targets: hit.map((o) => o.id) });
-      for (const o of hit) damage(sim, o, st.burnHit * PASSIVES.explodeDmg, null, ev);
+      ev.push({ type: "passive", mage: st.burnBy, kind: "explode", targets: hit.map((o) => o.id) });
+      for (const o of hit) damage(sim, o, st.burnHit * PASSIVES.explodeDmg, owner, ev);
     }
   }
   if (st.poison.stacks > 0 && st.poison.t > 0 && st.poison.lv >= PASSIVES.venomJumpLevel) {
@@ -112,19 +107,29 @@ function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
       bp.dps = st.poison.dps;
       bp.t = secs(PASSIVES.venomSecs);
       bp.lv = st.poison.lv;
-      ev.push({ type: "passive", mage: 0, kind: "venomJump", targets: [best.id] });
+      bp.by = st.poison.by;
+      ev.push({ type: "passive", mage: st.poison.by, kind: "venomJump", targets: [best.id] });
     }
   }
 }
 
-/** Damage over time: ignores armor, still subject to shatter and shields. */
-function dot(sim: Sim, e: Enemy, amount: number, ev: SimEvent[]): void {
-  if (e.hp <= 0) return;
-  let dealt = amount;
-  if (sim.shatter && e.status.freezeT > 0) dealt *= 1.5;
-  if (e.status.shieldT > 0) dealt *= 0.5;
-  e.hp -= dealt;
-  if (e.hp <= 0) killEnemy(sim, e, null, ev);
+/** The mage with this id, or null once it has been sold or merged away. */
+const mageById = (sim: Sim, id: number): Mage | null => sim.mages.find((m) => m.id === id) ?? null;
+
+/** Sets a burn unless a stronger one (higher dps) is already active; the stronger keeps its level and owner. */
+function applyBurn(e: Enemy, dps: number, hit: number, lv: number, by: number): void {
+  const st = e.status;
+  if (st.burnT > 0 && st.burnDps > dps) return;
+  st.burnDps = dps;
+  st.burnT = secs(PASSIVES.burnSecs);
+  st.burnLv = lv;
+  st.burnHit = hit;
+  st.burnBy = by;
+}
+
+/** Recomputes the Ice L5 shatter flag; called whenever mages change and each status tick. */
+export function refreshShatter(sim: Sim): void {
+  sim.shatter = sim.mages.some((m) => m.kind === "ice" && m.level === 5);
 }
 
 /**
@@ -132,22 +137,23 @@ function dot(sim: Sim, e: Enemy, amount: number, ev: SimEvent[]): void {
  * ticks is active (movement, shatter) on ticks T..T+N-1 and deals N ticks of damage.
  */
 export function statusTick(sim: Sim, ev: SimEvent[]): void {
-  sim.shatter = sim.mages.some((m) => m.kind === "ice" && m.level === 5);
+  refreshShatter(sim);
   for (const e of [...sim.enemies]) {
     if (e.hp <= 0) continue;
     const st = e.status;
     if (st.burnT > 0) {
-      dot(sim, e, st.burnDps / TICK_HZ, ev);
+      damage(sim, e, st.burnDps / TICK_HZ, mageById(sim, st.burnBy), ev, { ignoreArmor: true });
       if (--st.burnT === 0) {
         st.burnDps = 0;
         st.burnLv = 0;
         st.burnHit = 0;
+        st.burnBy = 0;
       }
     }
     if (e.hp <= 0) continue;
     if (st.poison.t > 0) {
-      dot(sim, e, (st.poison.stacks * st.poison.dps) / TICK_HZ, ev);
-      if (--st.poison.t === 0) st.poison = { stacks: 0, dps: 0, t: 0, lv: 0 };
+      damage(sim, e, (st.poison.stacks * st.poison.dps) / TICK_HZ, mageById(sim, st.poison.by), ev, { ignoreArmor: true });
+      if (e.hp > 0 && --st.poison.t === 0) st.poison = { stacks: 0, dps: 0, t: 0, lv: 0, by: 0 };
     }
     if (st.slowT > 0 && --st.slowT === 0) st.slow = 0;
     if (st.freezeT > 0) st.freezeT--;
@@ -155,9 +161,9 @@ export function statusTick(sim: Sim, ev: SimEvent[]): void {
 }
 
 /** Deals damage after armor (floor 1), shatter and shield; kills the enemy at 0 HP. */
-export function damage(sim: Sim, e: Enemy, amount: number, by: Mage | null, ev: SimEvent[]): void {
+export function damage(sim: Sim, e: Enemy, amount: number, by: Mage | null, ev: SimEvent[], opts: { ignoreArmor?: boolean } = {}): void {
   if (e.hp <= 0) return;
-  let dealt = Math.max(1, amount - e.armor);
+  let dealt = opts.ignoreArmor ? amount : Math.max(1, amount - e.armor);
   if (sim.shatter && e.status.freezeT > 0) dealt *= 1.5;
   if (e.status.shieldT > 0) dealt *= 0.5;
   e.hp -= dealt;
@@ -215,10 +221,7 @@ function passives(sim: Sim, m: Mage, target: Enemy, hitDmg: number, ev: SimEvent
   switch (m.kind) {
     case "fire":
       if (!alive) return;
-      st.burnDps = hitDmg * (MAGES.fire.passive[lv - 1] / 100);
-      st.burnT = secs(PASSIVES.burnSecs);
-      st.burnLv = lv;
-      st.burnHit = hitDmg;
+      applyBurn(target, hitDmg * (MAGES.fire.passive[lv - 1] / 100), hitDmg, lv, m.id);
       note("burn", [target]);
       return;
     case "ice":
@@ -268,12 +271,13 @@ function passives(sim: Sim, m: Mage, target: Enemy, hitDmg: number, ev: SimEvent
       p.dps = PASSIVES.venomDpsPerLevel * lv;
       p.t = secs(PASSIVES.venomSecs);
       p.lv = lv;
+      p.by = m.id;
       note("venom", [target]);
       return;
     }
     case "wind": {
       // Always draw, so the RNG stream does not depend on who was hit.
-      const roll = sim.rng.next();
+      const roll = sim.combatRng.next();
       if (!alive || ENEMIES[target.kind].boss !== null) return;
       if (roll < MAGES.wind.passive[lv - 1] / 100) {
         target.d = Math.max(0, target.d - PASSIVES.knockback[lv - 1]);

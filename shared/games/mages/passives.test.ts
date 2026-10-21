@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MAGES, secs, type MageId } from "./data";
-import { combatTick, damage, mageStats, statusTick } from "./combat";
+import { combatTick, damage, killEnemy as reapForTest, mageStats, statusTick } from "./combat";
 import { pathPoint } from "./map";
-import { createSim, spawnForTest, step, type Enemy, type Mage, type Sim, type SimEvent } from "./sim";
+import { applyAction, createSim, spawnForTest, step, type Enemy, type Mage, type Sim, type SimEvent } from "./sim";
 
 interface Rig {
   sim: Sim;
@@ -48,6 +48,138 @@ const foe = (r: Rig, d: number, hp = 1e5, kind: "goblin" | "knight" | "goblinChi
 const hitDmg = (r: Rig): number => mageStats(r.sim, r.m).dmg;
 const passiveEvents = (r: Rig, kind: string): SimEvent[] => r.ev.filter((e) => e.type === "passive" && e.kind === kind);
 const LEVELS = [1, 2, 3, 4, 5] as const;
+const killEnemyForTest = (r: Rig, e: Enemy): void => reapForTest(r.sim, e, null, r.ev);
+
+const ownerOf = (r: Rig, kind: string): number => (passiveEvents(r, kind)[0] as Extract<SimEvent, { type: "passive" }>).mage;
+/** Adds a second mage of the same kind/level (on `tile`) and parks the first so only the second attacks. */
+function addSecond(r: Rig, tile: number): Mage {
+  const m2: Mage = { ...r.m, id: r.sim.nextId++, tile, cd: 0, hits: 0 };
+  r.sim.mages.push(m2);
+  r.m.cd = 1e9;
+  return m2;
+}
+const otherTile = (r: Rig): number => r.sim.map.tiles.findIndex((t, i) => t.kind === "build" && t.terrain !== "blocked" && i !== r.m.tile);
+
+describe("passive owners, credit, burn strength", () => {
+  it("burnSpread and explode events name the mage that applied the burn (two same-level fire mages)", () => {
+    const r = rig("fire", 5);
+    const m2 = addSecond(r, r.m.tile);
+    const a = foe(r, r.d0 + 1);
+    foe(r, r.d0 + 0.2, 1e5);
+    combatTick(r.sim, r.ev);
+    expect(a.status.burnBy).toBe(m2.id);
+    a.hp = 1;
+    m2.cd = 0;
+    combatTick(r.sim, r.ev);
+    expect(ownerOf(r, "burnSpread")).toBe(m2.id);
+    expect(ownerOf(r, "explode")).toBe(m2.id);
+    expect(m2.id).not.toBe(r.m.id);
+  });
+
+  it("burnSpread owner survives the owner being sold", () => {
+    const r = rig("fire", 3);
+    const a = foe(r, r.d0 + 1);
+    foe(r, r.d0 + 0.5);
+    hit(r);
+    r.sim.mages.length = 0;
+    a.hp = 0;
+    killEnemyForTest(r, a);
+    expect(ownerOf(r, "burnSpread")).toBe(r.m.id);
+  });
+
+  it("venomJump names the mage that applied the stacks", () => {
+    const r = rig("poison", 5);
+    const m2 = addSecond(r, r.m.tile);
+    const a = foe(r, r.d0 + 2);
+    foe(r, r.d0 + 1);
+    for (let i = 0; i < 3; i++) {
+      m2.cd = 0;
+      combatTick(r.sim, r.ev);
+    }
+    a.hp = 1;
+    m2.cd = 0;
+    combatTick(r.sim, r.ev);
+    expect(ownerOf(r, "venomJump")).toBe(m2.id);
+  });
+
+  it("burn and venom kills credit the owner (ruins gold bonus), null once it is gone", () => {
+    const r = rig("fire", 1);
+    (r.sim.map.tiles[r.m.tile] as { terrain: string }).terrain = "ruins";
+    const e = foe(r, r.d0);
+    hit(r);
+    e.hp = 0.001;
+    const gold = r.sim.gold;
+    const ev: SimEvent[] = [];
+    statusTick(r.sim, ev);
+    expect(r.sim.gold - gold).toBe(6); // goblin 4 gold, +50%
+    expect(ev.find((x) => x.type === "kill")).toMatchObject({ by: r.m.id });
+    const q = rig("fire", 1);
+    const f = foe(q, q.d0);
+    hit(q);
+    q.sim.mages.length = 0;
+    f.hp = 0.001;
+    const ev2: SimEvent[] = [];
+    statusTick(q.sim, ev2);
+    expect(ev2.find((x) => x.type === "kill")).toMatchObject({ by: null });
+  });
+
+  it("explosion kills credit the owner", () => {
+    const r = rig("fire", 5);
+    (r.sim.map.tiles[r.m.tile] as { terrain: string }).terrain = "ruins";
+    const a = foe(r, r.d0 + 1);
+    const b = foe(r, r.d0 + 0.2, 1);
+    hit(r);
+    a.hp = 1;
+    r.ev.length = 0;
+    hit(r);
+    expect(r.ev.filter((x) => x.type === "kill" && x.enemy === b.id)[0]).toMatchObject({ by: r.m.id, gold: 6 });
+  });
+
+  it("a stronger burn is not overwritten by a weaker one, and overwrites a weaker one", () => {
+    const r = rig("fire", 1);
+    const e = foe(r, r.d0);
+    Object.assign(e.status, { burnDps: 999, burnT: 10, burnLv: 5, burnHit: 1000, burnBy: 77 });
+    hit(r);
+    expect(e.status).toMatchObject({ burnDps: 999, burnT: 10, burnLv: 5, burnBy: 77 });
+    Object.assign(e.status, { burnDps: 0.001 });
+    hit(r);
+    expect(e.status).toMatchObject({ burnT: secs(3), burnLv: 1, burnBy: r.m.id });
+  });
+
+  it("burn spread does not weaken a stronger burn", () => {
+    const r = rig("fire", 3);
+    const a = foe(r, r.d0 + 1);
+    const b = foe(r, r.d0 + 0.5);
+    Object.assign(b.status, { burnDps: 999, burnT: 10, burnLv: 5, burnHit: 1000, burnBy: 77 });
+    hit(r);
+    a.hp = 1;
+    hit(r);
+    expect(b.status).toMatchObject({ burnDps: 999, burnT: 10, burnBy: 77 });
+  });
+
+  it("shatter is current the moment mages change (merge, sell)", () => {
+    const r = rig("ice", 4);
+    const e = foe(r, r.d0);
+    const t2 = otherTile(r);
+    r.sim.mages.push({ ...r.m, id: r.sim.nextId++, tile: t2 });
+    expect(r.sim.shatter).toBe(false);
+    expect(applyAction(r.sim, { t: 0, type: "merge", from: t2, to: r.m.tile }, r.ev)).toBe(true);
+    expect(r.sim.shatter).toBe(true);
+    e.status.freezeT = 5;
+    damage(r.sim, e, 10, null, r.ev);
+    expect(e.maxHp - e.hp).toBe(15);
+    expect(applyAction(r.sim, { t: 0, type: "sell", tile: r.m.tile }, r.ev)).toBe(true);
+    expect(r.sim.shatter).toBe(false);
+  });
+
+  it("wind hits do not touch the wave rng", () => {
+    const r = rig("wind", 1, 1);
+    foe(r, r.d0);
+    const before = r.sim.rng.state();
+    for (let i = 0; i < 50; i++) hit(r);
+    expect(r.sim.rng.state()).toBe(before);
+  });
+});
 
 describe("fire: burn", () => {
   it("fire burn dps by level", () => {
@@ -379,4 +511,4 @@ describe("wind: gust", () => {
 });
 
 /** Recorded once from this implementation: gusts out of 1000 wind L1 hits with seed 1. */
-const GUSTS_SEED_1 = 116;
+const GUSTS_SEED_1 = 114;
