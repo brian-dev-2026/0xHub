@@ -27,3 +27,8 @@ export function makeRng(seed: number): Rng {
     state: () => s,
   };
 }
+
+/** Resumes a stream from `rng.state()` (the next draws match the original's). */
+export function restoreRng(state: number): Rng {
+  return makeRng(state);
+}

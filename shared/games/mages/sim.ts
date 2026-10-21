@@ -128,6 +128,11 @@ export interface Sim {
   wave: number;
   /** Ticks left in the build break (only counts down after a wave has been played). */
   breakT: number;
+  /** Tick the current wave or build break began (0 before wave 1). */
+  phaseTick: number;
+  /** Waves cleared so far, and lives left when the last one was cleared (the Endless score uses both). */
+  wavesCleared: number;
+  livesAtClear: number;
   gold: number;
   lives: number;
   purchases: number;
@@ -185,6 +190,9 @@ export function createSim(cfg: SimConfig): Sim {
     phase: "build",
     wave: 0,
     breakT: 0,
+    phaseTick: 0,
+    wavesCleared: 0,
+    livesAtClear: 0,
     gold: ECON.startGold,
     lives: LIVES,
     purchases: 0,
@@ -247,6 +255,7 @@ function startNextWave(sim: Sim, ev: SimEvent[]): void {
   sim.wave++;
   sim.phase = "wave";
   sim.breakT = 0;
+  sim.phaseTick = sim.tick;
   const queue: { tick: number; kind: EnemyId }[] = [];
   for (const grp of waveGroups(sim, sim.wave))
     for (let i = 0; i < grp.count; i++) queue.push({ tick: sim.tick + secs(grp.delay + i * grp.every), kind: grp.kind });
@@ -386,6 +395,9 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
   ev.push({ type: "waveEnd", wave: sim.wave, bonus });
   sim.phase = "build";
   sim.breakT = secs(BUILD_BREAK_SECS);
+  sim.phaseTick = sim.tick;
+  sim.wavesCleared++;
+  sim.livesAtClear = sim.lives;
 }
 
 /**
