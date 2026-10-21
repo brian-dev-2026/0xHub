@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVES, MAGES, PASSIVES, secs, type MageId } from "./data";
+import { ACTIVES, MAGES, PASSIVES, secs, type EnemyId, type MageId } from "./data";
 import { combatTick, mageStats } from "./combat";
 import { zoneTick } from "./actives";
 import { pathLength, pathPoint } from "./map";
@@ -38,7 +38,7 @@ function rig(kind: MageId, level: 1 | 2 | 3 | 4 | 5, seed = 1): Rig {
   throw new Error("no straight stretch");
 }
 
-const foe = (r: Rig, d: number, kind: "goblin" | "knight" | "bat" | "goblinChief" = "goblin", hp = 1e6): Enemy => {
+const foe = (r: Rig, d: number, kind: EnemyId = "goblin", hp = 1e6): Enemy => {
   const e = spawnForTest(r.sim, kind, d);
   e.hp = e.maxHp = hp;
   return e;
@@ -268,6 +268,32 @@ describe("actives by mage", () => {
     step(w.sim, []);
     expect(zones(w, "wall").length).toBe(0);
     expect(gob.d).toBeGreaterThan(w.d0);
+  });
+
+  it("a shaman inside a plague cloud does not heal", () => {
+    // Control: the same shaman heals when there is no cloud.
+    const c = rig("poison", 1);
+    const cs = foe(c, c.d0 + 1, "shaman");
+    cs.status.freezeT = 1e6;
+    cs.hp = cs.maxHp / 2;
+    for (let i = 0; i <= secs(3); i++) step(c.sim, []);
+    expect(cs.hp).toBeGreaterThan(cs.maxHp / 2);
+
+    const r = rig("poison", 1);
+    const sh = foe(r, r.d0 + 1, "shaman");
+    const ally = foe(r, r.d0 + 1.5);
+    for (const e of [sh, ally]) {
+      e.status.freezeT = 1e6;
+      e.hp = e.maxHp / 2;
+    }
+    step(r.sim, [castAction(r, tileAt(r, r.d0))]);
+    // The cloud lasts 5 s, so it covers the shaman's first heal at 3 s; poison only ever lowers HP.
+    for (let i = 1; i < secs(4); i++) {
+      const before = [sh.hp, ally.hp];
+      step(r.sim, []);
+      expect(sh.hp).toBeLessThanOrEqual(before[0]);
+      expect(ally.hp).toBeLessThanOrEqual(before[1]);
+    }
   });
 
   it("plague blocks shaman healing and L5 follows enemies", () => {

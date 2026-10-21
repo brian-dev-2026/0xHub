@@ -1,7 +1,7 @@
 // Mage Siege combat: mage stats, damage, kills and basic attacks. Deterministic
 // (no Math.pow/sin/cos). Passives live here; actives and zones in actives.ts; Tasks 7-8 add traps and bosses.
 
-import { ACTIVE_CHARGE_SECS, ECON, ENEMIES, LEVEL, MAGES, PASSIVES, TERRAIN_BOOST, TICK_HZ, secs } from "./data";
+import { ACTIVE_CHARGE_SECS, BOSS_STUN, ECON, ENEMIES, LEVEL, MAGES, PASSIVES, SHIELD_DAMAGE, TERRAIN_BOOST, TICK_HZ, secs } from "./data";
 import { pathPoint } from "./map";
 import type { Enemy, Mage, Sim, SimEvent } from "./sim";
 
@@ -37,6 +37,9 @@ export function mageStats(sim: Sim, m: Mage): { dmg: number; aps: number; range:
   else if (terrain === "well") chargeRate *= 1 + TERRAIN_BOOST.wellCharge;
   return { dmg, aps, range, chargeRate };
 }
+
+/** Ticks a stun or freeze of `s` seconds lasts on `e`: half (rounded to ticks) on bosses. */
+export const stunTicks = (e: Enemy, s: number): number => secs(ENEMIES[e.kind].boss !== null ? s * BOSS_STUN : s);
 
 /** The one kill path: removes the enemy, pays its gold (+50% on ruins) and records the kill. */
 export function killEnemy(sim: Sim, e: Enemy, by: Mage | null, ev: SimEvent[]): void {
@@ -84,10 +87,12 @@ function nearest(sim: Sim, from: Enemy, list: Enemy[]): Enemy | null {
 
 /**
  * Death-triggered passives, run from the single kill path after `e` has left the
- * board (so nothing it triggers can hit it again): fire spread/explosion, venom jump.
+ * board (so nothing it triggers can hit it again): fire spread/explosion, venom jump, the Treant's saplings.
  */
 function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
   const st = e.status;
+  // Saplings die with their Treant (no gold).
+  if (e.kind === "treant") for (const s of sim.enemies.filter((o) => o.kind === "sapling")) killEnemy(sim, s, null, ev);
   if (st.burnT > 0 && st.burnLv >= PASSIVES.burnSpreadLevel) {
     const owner = mageById(sim, st.burnBy);
     const spread = near(sim, e, PASSIVES.burnSpreadRadius);
@@ -141,6 +146,8 @@ export function statusTick(sim: Sim, ev: SimEvent[]): void {
   for (const e of [...sim.enemies]) {
     if (e.hp <= 0) continue;
     const st = e.status;
+    // Counted down first, so every damage source this tick sees the same shield.
+    if (st.shieldT > 0) st.shieldT--;
     if (st.burnT > 0) {
       damage(sim, e, st.burnDps / TICK_HZ, mageById(sim, st.burnBy), ev, { ignoreArmor: true });
       if (--st.burnT === 0) {
@@ -167,7 +174,7 @@ export function damage(sim: Sim, e: Enemy, amount: number, by: Mage | null, ev: 
   if (e.hp <= 0) return;
   let dealt = opts.ignoreArmor ? amount : Math.max(1, amount - e.armor);
   if (sim.shatter && e.status.freezeT > 0) dealt *= 1.5;
-  if (e.status.shieldT > 0) dealt *= 0.5;
+  if (e.status.shieldT > 0) dealt *= SHIELD_DAMAGE;
   e.hp -= dealt;
   if (e.hp <= 0) killEnemy(sim, e, by, ev);
 }
@@ -235,7 +242,7 @@ function passives(sim: Sim, m: Mage, target: Enemy, hitDmg: number, ev: SimEvent
       st.slowT = secs(PASSIVES.slowSecs);
       note("chill", [target]);
       if (lv >= PASSIVES.freezeLevel && m.hits % PASSIVES.freezeEvery === 0) {
-        st.freezeT = secs(PASSIVES.freezeSecs);
+        st.freezeT = stunTicks(target, PASSIVES.freezeSecs);
         note("freeze", [target]);
       }
       if (sim.shatter && st.freezeT > 0) note("shatter", [target]);

@@ -188,6 +188,44 @@ export const ACTIVES = {
   tornadoDelaySecs: 1,
 };
 
+/** Enemy traits and boss skills: periods in seconds, radii in tiles, fractions of max HP. */
+export const ABILITIES = {
+  /** Shaman: heals every enemy in range (itself included) for 8% of its max HP. */
+  shamanHealSecs: 3,
+  shamanHealRadius: 1.5,
+  shamanHealPct: 0.08,
+  /** Goblin Chief: calls goblins at its own position. */
+  chiefSummonSecs: 6,
+  chiefSummonCount: 4,
+  /** Dire Wolf: sprints at 2x speed for 2 s, every 8 s. */
+  wolfSprintEverySecs: 8,
+  wolfSprintSecs: 2,
+  wolfSprintSpeed: 2,
+  /** Troll: regains 1% max HP per second unless burning or poisoned. */
+  trollRegenSecs: 1,
+  trollRegenPct: 0.01,
+  /** Witch: shields every enemy in range (herself included) for 3 s, every 7 s. */
+  witchShieldEverySecs: 7,
+  witchShieldSecs: 3,
+  witchShieldRadius: 2,
+  /** Ancient Treant: saplings ahead of it, healing, Root Slam, enrage. */
+  treantPlantSecs: 10,
+  treantSaplings: 3,
+  /** Saplings never sit closer than this to the exit, so they cannot leak. */
+  saplingEndMargin: 0.5,
+  treantHealSecs: 1,
+  treantHealPctPerSapling: 0.02,
+  treantSlamSecs: 15,
+  treantSlamTargets: 3,
+  treantSlamStunSecs: 3,
+  /** Below this fraction of max HP the Treant moves faster. */
+  treantEnrageBelow: 0.5,
+  treantEnrageSpeed: 1.3,
+};
+
+/** Fraction of damage a shielded enemy takes. */
+export const SHIELD_DAMAGE = 0.5;
+
 /** Bosses (mini and final) take stuns and freezes this much as long. */
 export const BOSS_STUN = 0.5;
 

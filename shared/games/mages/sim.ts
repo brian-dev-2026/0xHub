@@ -7,6 +7,7 @@ import {
   type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
 import { castActive, wallStop, zoneTick } from "./actives";
+import { enemyAbilities, freshAbilities, type Abilities } from "./bosses";
 import { castSpell, hazardTick, placeTrap, powi, trapStop } from "./hazards";
 import { combatTick, killEnemy, magePrice, refreshShatter, statusTick } from "./combat";
 import { generateMap, pathLength, type GameMap } from "./map";
@@ -67,6 +68,8 @@ export interface Enemy {
   order: number;
   status: Status;
   gold: number;
+  /** Trait and boss-skill timers (see bosses.ts). */
+  abil: Abilities;
 }
 
 /**
@@ -160,6 +163,7 @@ export type SimEvent =
   | { type: "trapTrigger"; trap: number; enemies: number[] }
   | { type: "trapBreak"; trap: number }
   | { type: "spell"; spell: SpellId; target?: number }
+  | { type: "bossSkill"; enemy: number; skill: "summon" | "sprint" | "regen" | "shield" | "heal" | "saplings" | "rootSlam"; targets: number[] }
   | { type: "waveStart"; wave: number }
   | { type: "waveEnd"; wave: number; bonus: number }
   | { type: "end"; won: boolean };
@@ -215,11 +219,11 @@ const freshStatus = (): Status => ({
   poison: { stacks: 0, dps: 0, t: 0, lv: 0, by: 0 }, shieldT: 0, noHealT: 0,
 });
 
-function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
+export function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
   const def = ENEMIES[kind];
   const hp = def.hp * hpScale(sim);
   const e: Enemy = {
-    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: def.gold,
+    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: def.gold, abil: freshAbilities(kind, sim.tick),
   };
   sim.enemies.push(e);
   return e;
@@ -282,7 +286,7 @@ function applyActionInner(sim: Sim, a: Action, ev: SimEvent[]): boolean {
     case "merge": {
       const from = mageOn(sim, a.from);
       const to = mageOn(sim, a.to);
-      if (!from || !to || from === to || from.kind !== to.kind || from.level !== to.level || to.level >= MAX_LEVEL) return false;
+      if (!from || !to || from === to || from.stunT > 0 || to.stunT > 0 || from.kind !== to.kind || from.level !== to.level || to.level >= MAX_LEVEL) return false;
       to.level = (to.level + 1) as Mage["level"];
       to.spent += from.spent;
       sim.mages.splice(sim.mages.indexOf(from), 1);
@@ -291,13 +295,13 @@ function applyActionInner(sim: Sim, a: Action, ev: SimEvent[]): boolean {
     }
     case "move": {
       const m = mageOn(sim, a.from);
-      if (!m || !isFreeBuildTile(sim, a.to)) return false;
+      if (!m || m.stunT > 0 || !isFreeBuildTile(sim, a.to)) return false;
       m.tile = a.to;
       return true;
     }
     case "sell": {
       const m = mageOn(sim, a.tile);
-      if (!m) return false;
+      if (!m || m.stunT > 0) return false;
       const refund = Math.floor(m.spent * ECON.sellRate);
       sim.gold += refund;
       sim.mages.splice(sim.mages.indexOf(m), 1);
@@ -381,7 +385,8 @@ function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
  *  2. build break countdown; at 0 the next wave starts
  *  3. spawn due enemies
  *  4. status ticks (burn, poison, timers), mage combat (meters charge here), zones
- *     (lava, blizzard, plague, charged ground, walls, tornadoes); traps and spell cooldowns; later tasks: boss abilities
+ *     (lava, blizzard, plague, charged ground, walls, tornadoes); traps and spell cooldowns;
+ *     then enemy traits and boss skills (shaman heal, chief summons, wolf sprint, troll regen, witch shield, Treant)
  *  5. reap enemies at 0 HP
  *  6. move enemies
  *  7. leaks
@@ -412,7 +417,8 @@ export function step(sim: Sim, actions: Action[]): SimEvent[] {
   zoneTick(sim, ev);
   // Traps trigger and wear down after the zones and before movement, so a barricade holds this tick's step.
   hazardTick(sim, ev);
-  // Task 8 adds here: shaman/boss abilities.
+  // Traits and boss skills run after the zones, so a plague cloud's no-heal holds this tick, and before reaping and movement.
+  enemyAbilities(sim, ev);
 
   reapDead(sim, ev);
   moveEnemies(sim);

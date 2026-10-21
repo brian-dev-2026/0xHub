@@ -1,8 +1,8 @@
 // Mage Siege active skills: tap-to-cast actives and the zones they leave on the
 // path. Deterministic (no Math.pow/sin/cos); all damage goes through damage().
 
-import { ACTIVES, BOSS_STUN, ENEMIES, MAGES, PASSIVES, TICK_HZ, secs } from "./data";
-import { applyBurn, damage, dist, mageById, mageStats } from "./combat";
+import { ACTIVES, ENEMIES, MAGES, PASSIVES, TICK_HZ, secs } from "./data";
+import { applyBurn, damage, dist, mageById, mageStats, stunTicks } from "./combat";
 import { pathLength, pathPoint } from "./map";
 import type { Enemy, Mage, Sim, SimEvent, Trap, Zone } from "./sim";
 
@@ -13,11 +13,18 @@ import type { Enemy, Mage, Sim, SimEvent, Trap, Zone } from "./sim";
  */
 const CAST_LEAD = 1;
 
-/** Ticks a stun or freeze of `s` seconds lasts on `e`: half (rounded to ticks) on bosses. */
-const stunTicks = (e: Enemy, s: number): number => secs(ENEMIES[e.kind].boss !== null ? s * BOSS_STUN : s);
-
 function stun(e: Enemy, s: number): void {
   e.status.stunT = Math.max(e.status.stunT, stunTicks(e, s) + CAST_LEAD);
+}
+
+/**
+ * Stuns mage `m` for `s` seconds from a skill that fires after combatTick (Root Slam):
+ * combat counts stunT down first on each later tick, so +1 makes the mage unable to
+ * attack on exactly the next secs(s) ticks (a cast, which checks before that countdown,
+ * is refused one tick longer).
+ */
+export function stunMage(m: Mage, s: number): void {
+  m.stunT = Math.max(m.stunT, secs(s) + 1);
 }
 
 export function freeze(e: Enemy, s: number): void {
