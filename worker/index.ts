@@ -43,7 +43,10 @@ import { gameHistory, gameSummaries, recordCpuResult, topCpu, topRatings, topSco
 import { parseCpuResult } from "../shared/games/cpu";
 import { isDifficulty } from "../shared/games/mines";
 import { chessTimeControl } from "../shared/games/clocks";
+import { checkStart, unlocked } from "../shared/games/mages/progress";
+import type { SimConfig } from "../shared/games/mages/sim";
 import type { Env } from "./env";
+import { getProgress } from "./mages";
 
 export { Matchmaker } from "./matchmaker";
 export { BattleRoom } from "./room";
@@ -54,6 +57,7 @@ export { Connect4Room } from "./games/connect4Room";
 export { ChessRoom } from "./games/chessRoom";
 export { GeneralsRoom } from "./games/generalsRoom";
 export { MinesRun, Run2048 } from "./games/soloRuns";
+export { MageRun } from "./mages";
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), {
@@ -373,6 +377,8 @@ async function route(request: Request, env: Env): Promise<Response> {
         return json(await topRatings(env.DB, game, "rating"));
       case "pool":
         return json(await topCpu(env.DB, "pool"));
+      case "mages":
+        return json(await topScores(env.DB, "mages", "endless"));
       default:
         return err("Unknown game", 404);
     }
@@ -413,6 +419,40 @@ async function route(request: Request, env: Env): Promise<Response> {
     const runId = crypto.randomUUID();
     await env.RUN2048.get(env.RUN2048.idFromName(runId)).init(u.id);
     return json({ runId });
+  }
+
+  // ---------- Mage Siege: progress and wave-by-wave verified runs ----------
+
+  if (pathname === "/api/mages/progress" && method === "GET") {
+    const u = await requireUser(request, env);
+    const progress = await getProgress(env.DB, u.id);
+    return json({ progress, unlocked: unlocked(progress) });
+  }
+
+  if (pathname === "/api/mages/start" && method === "POST") {
+    const u = await requireUser(request, env);
+    const b = await body(request);
+    const mode: SimConfig["mode"] | null = b.mode === "stage" || b.mode === "endless" ? b.mode : null;
+    if (!mode) return err("Unknown mode.");
+    const stage = mode === "endless" ? 1 : b.stage;
+    if (typeof stage !== "number" || !Number.isInteger(stage) || stage < 1 || stage > 5) return err("Stage must be 1–5.");
+    await limit(env, `run-start:${u.id}`, 300, HOUR);
+    const progress = await getProgress(env.DB, u.id);
+    const why = checkStart(progress, mode, stage, b.team);
+    if (why) return err(why[0].toUpperCase() + why.slice(1) + ".");
+    const have = unlocked(progress);
+    const cfg: Omit<SimConfig, "seed"> = { mode, stage: stage as SimConfig["stage"], team: b.team as SimConfig["team"], traps: have.traps, spells: have.spells };
+    const runId = crypto.randomUUID();
+    const { seed } = await env.MAGE_RUN.get(env.MAGE_RUN.idFromName(runId)).init(u.id, cfg);
+    return json({ runId, seed, cfg: { ...cfg, seed } });
+  }
+
+  const magesInput = pathname.match(/^\/api\/mages\/runs\/([0-9a-f-]{36})\/input$/);
+  if (magesInput && method === "POST") {
+    const u = await requireUser(request, env);
+    const b = await body(request, 2_000_000);
+    const res = await env.MAGE_RUN.get(env.MAGE_RUN.idFromName(magesInput[1])).input(u.id, b);
+    return json(res, res.ok ? 200 : 400);
   }
 
   // ---------- realtime ----------

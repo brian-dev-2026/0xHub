@@ -258,6 +258,7 @@ const GAME_TITLE: Record<GameId, string> = {
   connect4: "Connect Four",
   chess: "Chess",
   generals: "Game of the Generals",
+  mages: "Mage Siege",
 };
 /** How a chess / Generals game ended, for history lines. */
 const REASON_TEXT: Record<string, string> = {

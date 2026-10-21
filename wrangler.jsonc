@@ -26,14 +26,16 @@
       { "name": "CHESS_ROOM", "class_name": "ChessRoom" },
       { "name": "GENERALS_ROOM", "class_name": "GeneralsRoom" },
       { "name": "MINES_RUN", "class_name": "MinesRun" },
-      { "name": "RUN2048", "class_name": "Run2048" }
+      { "name": "RUN2048", "class_name": "Run2048" },
+      { "name": "MAGE_RUN", "class_name": "MageRun" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Matchmaker", "BattleRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["EndlessRun"] },
     { "tag": "v3", "new_sqlite_classes": ["SnakeRoom", "Duel2048Room", "Connect4Room", "MinesRun", "Run2048"] },
-    { "tag": "v4", "new_sqlite_classes": ["ChessRoom", "GeneralsRoom"] }
+    { "tag": "v4", "new_sqlite_classes": ["ChessRoom", "GeneralsRoom"] },
+    { "tag": "v5", "new_sqlite_classes": ["MageRun"] }
   ],
   "triggers": { "crons": ["17 3 * * *"] },
   "observability": { "enabled": true }
