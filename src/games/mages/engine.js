@@ -148,6 +148,8 @@ export function mountMages(host, { onExit, api }) {
     window.__mages = {
       view, get terrain() { return terrain; }, get units() { return units; }, get sim() { return sim; }, setQuality, showMap: seed => showMap(generateMap(seed)),
       tick: n => runTicks(n), pause: on => { paused = on; },
+      programs: () => view.renderer.info.programs.length,
+      startWave: () => { for (const ev of step(sim, [{ t: sim.tick, type: 'startWave' }])) units.onEvent(ev); },
       focus(x, z, dist = 2.5, tilt = 0.6, yaw = 0, lift = 0.3) {
         const y = view.groundAt(x, z) + lift, c = view.camera;
         c.clearViewOffset();

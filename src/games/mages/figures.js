@@ -11,6 +11,8 @@ import {
 } from './textures';
 
 const TAU = Math.PI * 2;
+/** Parts smaller than this (bounding radius, tiles) cast no shadow. */
+const SMALL_PART = 0.025;
 const WHITE = new THREE.Color(1, 1, 1);
 
 /** Element looks: robe, mantle and hood cloth, crystal glow, beard, crystal cut, staff and crystal holder. */
@@ -225,7 +227,9 @@ export function createKit(q) {
 
   const mesh = (g, m, name) => {
     const o = new THREE.Mesh(g, m);
-    o.castShadow = q.shadows; o.receiveShadow = q.shadows;
+    // Only High casts figure shadows, and never from tiny parts (eyes, teeth, rivets, buckles, gems): each caster is a draw call
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    o.castShadow = q.figureShadows && g.boundingSphere.radius >= SMALL_PART; o.receiveShadow = q.shadows;
     if (name) o.name = name;
     return o;
   };
@@ -576,7 +580,7 @@ export function createKit(q) {
         for (let i = 0; i < gp.count; i++) { const x = gp.getX(i); gp.setZ(i, gp.getZ(i) - x * x * 3); }
         g.computeVertexNormals();
         const shield = new THREE.Mesh(g, [M.heraldry(), steel]);
-        shield.castShadow = q.shadows; shield.receiveShadow = q.shadows;
+        shield.castShadow = q.figureShadows; shield.receiveShadow = q.shadows;
         shield.position.set(-0.03, -0.1, 0.05); shield.rotation.set(0.05, -0.45, 0);
         arm.add(shield);
       }

@@ -48,6 +48,46 @@ export function createUnits(view, quality) {
     return g;
   }
   const restOf = (nodes, names) => { const r = {}; for (const n of names) if (nodes[n]) r[n] = { rot: nodes[n].rotation.clone(), pos: nodes[n].position.clone() }; return r; };
+  const auraMaterial = c => new THREE.MeshBasicMaterial({
+    map: kit.auraTex(1), color: c, transparent: true, depthWrite: false, toneMapped: false,
+    polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+  });
+  /** Turns a figure material into its death-dissolve variant (noise alpha map eaten away by lowering opacity). */
+  const toDissolve = m => { m.alphaMap = kit.dissolveTex; m.alphaTest = 0.5; m.transparent = false; m.needsUpdate = true; return m; };
+
+  // ================= Program keeper =================
+  // three r128 destroys a shader program when the last material using it is disposed. Enemies own material copies
+  // (and dissolve variants) that come and go with every kill and wave, and the kit's prototypes are never rendered,
+  // so programs would be rebuilt again and again. A hidden group keeps one compiled material of every variant alive
+  // until dispose(): a prototype clone per kind, a dissolve-variant clone per enemy kind, and the overlays.
+  const keeper = new THREE.Group();
+  keeper.name = 'units-keeper'; keeper.visible = false;
+  view.scene.add(keeper);
+  const kept = new Set(), keptMats = [];
+  let keepDirty = false;
+  const keep = (key, build) => { if (!kept.has(key)) { kept.add(key); build(); keepDirty = true; } };
+  function keepOverlays() {
+    keep('overlays', () => {
+      const aura = new THREE.Mesh(plane, auraMaterial(0xffffff)), charge = new THREE.Mesh(plane, kit.chargeMaterial(0xffffff));
+      keptMats.push(aura.material, charge.material);
+      keeper.add(aura, charge, stars(0), new THREE.Mesh(kit.iceGeo, kit.iceMat), new THREE.Sprite(kit.barBg), ...[0.1, 0.5, 1].map(v => new THREE.Sprite(kit.barFill(v))));
+    });
+  }
+  function keepMage(kind) {
+    keep('mage:' + kind, () => keeper.add(kit.mage(kind).root));
+    keepOverlays();
+  }
+  function keepEnemy(kind) {
+    keep('enemy:' + kind, () => {
+      keeper.add(kit.enemy(kind).root);
+      const ghost = kit.enemy(kind).root, copies = new Map();
+      const dis = m => { if (!copies.has(m)) { const c = toDissolve(m.clone()); copies.set(m, c); keptMats.push(c); } return copies.get(m); };
+      ghost.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(dis) : dis(o.material); });
+      keeper.add(ghost);
+    });
+    keepOverlays();
+  }
+
   const pose = (f, name, rx = 0, ry = 0, rz = 0, dy = 0) => {
     const n = f.nodes[name], r = f.rest[name];
     if (!n) return;
@@ -57,15 +97,13 @@ export function createUnits(view, quality) {
 
   // ================= Mages =================
   function makeMage(m) {
+    keepMage(m.kind);
     const E = ELEMENT[m.kind], { root: fig, nodes } = kit.mage(m.kind);
     const root = new THREE.Group(), turn = new THREE.Group();
     root.add(turn); turn.add(fig);
     const crystalMat = nodes.crystal.material.clone(), haloMat = nodes.halo.material.clone();
     nodes.crystal.material = crystalMat; nodes.halo.material = haloMat;
-    const aura = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({
-      map: kit.auraTex(1), color: E.glow, transparent: true, depthWrite: false, toneMapped: false,
-      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
-    }));
+    const aura = new THREE.Mesh(plane, auraMaterial(E.glow));
     aura.position.y = 0.012; aura.renderOrder = 2;
     const charge = new THREE.Mesh(plane, kit.chargeMaterial(E.glow));
     charge.position.y = 0.016; charge.scale.setScalar(0.46); charge.renderOrder = 3;
@@ -142,6 +180,7 @@ export function createUnits(view, quality) {
 
   // ================= Enemies =================
   function makeEnemy(e) {
+    keepEnemy(e.kind);
     const L = ENEMY_LOOK[e.kind], { root: fig, nodes } = kit.enemy(e.kind);
     // Own material copies, so hit flashes, frost and the dissolve tint only this figure
     const own = new Map(), mats = [];
@@ -282,7 +321,7 @@ export function createUnits(view, quality) {
     if (mode === 'dissolve') {
       for (const m of f.mats) {
         m.color.copy(m.userData.base.color); // drop any frost tint
-        m.alphaMap = kit.dissolveTex; m.alphaTest = 0.5; m.transparent = false; m.needsUpdate = true;
+        toDissolve(m);
       }
       f.fig.traverse(o => { o.castShadow = false; if (o.isSprite) o.visible = false; });
     }
@@ -341,6 +380,8 @@ export function createUnits(view, quality) {
       }
       for (const [id, f] of enemies) if (!seen.has(id)) { enemies.delete(id); startLeaving(f, f.killed ? 'dissolve' : 'fade'); }
       updateLeaving(dt);
+      // New kinds joined the keeper: compile now (with the scene's lights, which are part of each program's key)
+      if (keepDirty) { keepDirty = false; view.renderer.compile(view.scene, view.camera); }
     },
     onEvent(ev) {
       switch (ev.type) {
@@ -385,6 +426,8 @@ export function createUnits(view, quality) {
     /** An enemy's centre of mass (impact point), or null. */
     enemyAnchor: id => enemies.get(id)?.core ?? null,
     dispose() {
+      view.scene.remove(keeper);
+      for (const m of keptMats) m.dispose();
       for (const f of mages.values()) removeFigure(f);
       for (const f of enemies.values()) removeFigure(f);
       for (const l of leaving) removeFigure(l.f);

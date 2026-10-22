@@ -5,11 +5,12 @@ import { H as BOARD_H, W as BOARD_W } from '../../../shared/games/mages/data';
 
 // ================= Quality =================
 /** particles: share of each effect's particle budget; texSize: terrain texture width; segs: terrain vertices per tile;
- * scatter: share of the woodland around the board. */
+ * scatter: share of the woodland around the board; figureShadows: mages and enemies cast shadows (High only: each
+ * casting part is an extra draw call in the shadow pass). */
 export const QUALITY = {
-  high: { name: 'high', shadows: true, shadowSize: 2048, reflect: true, ripples: true, pixelRatio: 2, particles: 1, texSize: 2048, segs: 8, scatter: 1, aniso: 8, lights: true },
-  medium: { name: 'medium', shadows: true, shadowSize: 1024, reflect: false, ripples: true, pixelRatio: 1.5, particles: 0.75, texSize: 1536, segs: 6, scatter: 0.7, aniso: 4, lights: true },
-  low: { name: 'low', shadows: false, shadowSize: 0, reflect: false, ripples: false, pixelRatio: 1, particles: 0.5, texSize: 1024, segs: 4, scatter: 0.45, aniso: 1, lights: false },
+  high: { name: 'high', shadows: true, shadowSize: 2048, reflect: true, ripples: true, pixelRatio: 2, particles: 1, texSize: 2048, segs: 8, scatter: 1, aniso: 8, lights: true, figureShadows: true },
+  medium: { name: 'medium', shadows: true, shadowSize: 1024, reflect: false, ripples: true, pixelRatio: 1.5, particles: 0.75, texSize: 1536, segs: 6, scatter: 0.7, aniso: 4, lights: true, figureShadows: false },
+  low: { name: 'low', shadows: false, shadowSize: 0, reflect: false, ripples: false, pixelRatio: 1, particles: 0.5, texSize: 1024, segs: 4, scatter: 0.45, aniso: 1, lights: false, figureShadows: false },
 };
 const QUALITY_KEY = '0xhubms.quality';
 
