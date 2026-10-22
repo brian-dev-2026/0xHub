@@ -37,7 +37,7 @@ export function deckAt(spans, u, v) {
 
 // ================= Geometry helpers =================
 /** Averages normals of vertices that share a position (lathe seams, sphere poles), then normalizes. */
-function weldNormals(g) {
+export function weldNormals(g) {
   const p = g.attributes.position, n = g.attributes.normal, acc = new Map();
   const key = i => `${Math.round(p.getX(i) * 1e4)},${Math.round(p.getY(i) * 1e4)},${Math.round(p.getZ(i) * 1e4)}`;
   for (let i = 0; i < p.count; i++) {
@@ -48,7 +48,7 @@ function weldNormals(g) {
   return g;
 }
 /** Surface of revolution from a [radius, y] profile; shape(a, row, r, y) may return a changed [r, y]. */
-function revolve(profile, segA, shape) {
+export function revolve(profile, segA, shape) {
   const rows = profile.length, cols = segA + 1, pos = new Float32Array(rows * cols * 3), uv = new Float32Array(rows * cols * 2);
   for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
     const a = (i % segA) / segA * TAU;
@@ -71,7 +71,7 @@ function revolve(profile, segA, shape) {
   return weldNormals(g);
 }
 /** Merges indexed or non-indexed geometries with position/normal/uv (and colour, filled white where missing). */
-function merge(geos) {
+export function merge(geos) {
   const withColor = geos.some(g => g.attributes.color);
   let nv = 0, ni = 0;
   for (const g of geos) { nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
@@ -96,7 +96,7 @@ function merge(geos) {
   return g;
 }
 /** Per-vertex colour from fn(x, y, z, nx, ny, nz) → [r, g, b]. */
-function paintVerts(g, fn) {
+export function paintVerts(g, fn) {
   const p = g.attributes.position, n = g.attributes.normal, c = new Float32Array(p.count * 3);
   for (let i = 0; i < p.count; i++) { const v = fn(p.getX(i), p.getY(i), p.getZ(i), n.getX(i), n.getY(i), n.getZ(i)); c[i * 3] = v[0]; c[i * 3 + 1] = v[1]; c[i * 3 + 2] = v[2]; }
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));

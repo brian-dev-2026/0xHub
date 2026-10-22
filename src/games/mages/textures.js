@@ -352,3 +352,154 @@ export const highlightCanvas = () => memo('hl', () => {
   g.arcTo(10, N - 10, 10, 10, 16); g.arcTo(10, 10, N - 10, 10, 16); g.closePath(); g.stroke();
   return c;
 });
+
+// ================= Figure swatches (mages and enemies) =================
+// Figures are small on screen, so these read like a painted figurine: soft, low-contrast surface detail over broad
+// tonal variation, never per-pixel noise. Neutral-toned where a figure tints them with its material colour (cloth,
+// fur, skin); u runs around a part, v along it.
+
+/** Twill-woven cloth: soft raised threads on a diagonal, gentle slubs, lengthwise folds and wear. Light grey, tinted per robe. */
+export const clothSwatch = () => memo('cloth', () => paint((u, v, o) => {
+  const T = 64, tx = Math.floor(u * T), ty = Math.floor(v * T), fu = u * T - tx, fv = v * T - ty;
+  const warp = ((tx + ty) & 3) < 2; // the warp thread is on top for two of every four crossings: the diagonal twill
+  const prof = Math.sin(Math.PI * (warp ? fu : fv));
+  const slub = fbm(warp ? u * 32 : u * 8, warp ? v * 8 : v * 32, warp ? 32 : 8, warp ? 8 : 32, 2, 191);
+  const fold = fbm(u * 6, v * 1, 6, 1, 3, 193), wear = fbm(u * 3, v * 3, 3, 3, 4, 192);
+  const k = (0.965 + 0.035 * prof) * (0.97 + slub * 0.05) * (0.84 + fold * 0.16) * (0.92 + wear * 0.1), base = 212;
+  o[0] = base * k; o[1] = base * k * 0.985; o[2] = base * k * 0.965; o[3] = prof * 0.35 + fold * 0.45 + slub * 0.2;
+}));
+
+/** Tanned leather: fine pebbled grain, soft creases and worn, lighter patches. */
+export const leatherSwatch = () => memo('leather', () => paint((u, v, o) => {
+  const grain = fbm(u * 48, v * 48, 48, 48, 2, 201), crease = smooth(0.88, 0.99, ridged(u * 3, v * 5, 3, 5, 4, 203)), wear = fbm(u * 3, v * 3, 3, 3, 4, 204);
+  const col = mix([88, 56, 34], [132, 90, 56], clamp01(wear * 1.3 - 0.15)), k = (0.94 + grain * 0.08) * (1 - crease * 0.18);
+  o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k; o[3] = 0.55 + grain * 0.25 - crease * 0.4;
+}));
+
+/** Worked steel: soft brushed streaks, hammer dimples and smudges (also the roughness map). */
+export const metalSwatch = () => memo('metal', () => {
+  const sw = paint((u, v, o) => {
+    const brush = fbm(u * 2, v * 48, 2, 48, 3, 211), dent = fbm(u * 5, v * 5, 5, 5, 3, 212), smudge = smooth(0.55, 0.8, fbm(u * 3, v * 3, 3, 3, 4, 213));
+    const k = 168 + brush * 22 + dent * 18 - smudge * 30;
+    o[0] = k; o[1] = k; o[2] = k * 1.02; o[3] = 0.5 + dent * 0.4 + brush * 0.1;
+  });
+  strokes(sw, 80, prng(214), { len: [8, 30], width: 0.7, color: () => 'rgba(225,228,232,0.35)', hAlpha: 0.05 });
+  return sw;
+});
+
+/** Fur: soft locks of hair running lengthwise, darker at the roots, lighter at the tips. Neutral, tinted per animal. */
+export const furSwatch = () => memo('fur', () => {
+  const sw = paint((u, v, o) => {
+    const a = fbm(u * 4, v * 4, 4, 4, 4, 221), lock = fbm(u * 16, v * 3, 16, 3, 3, 223);
+    o[0] = o[1] = o[2] = 120 + a * 30 + lock * 30; o[3] = 0.3 + lock * 0.5;
+  });
+  const rnd = prng(222), along = r => Math.PI * (0.45 + r() * 0.1);
+  strokes(sw, 2600, rnd, { len: [7, 16], width: 1.6, color: r => { const g = 110 + r() * 50 | 0; return `rgba(${g},${g},${g},0.22)`; }, hAlpha: 0.12, angle: along });
+  strokes(sw, 900, rnd, { len: [6, 12], width: 1.2, color: r => { const g = 185 + r() * 40 | 0; return `rgba(${g},${g},${g * 0.98 | 0},0.18)`; }, hAlpha: 0.15, angle: along });
+  return sw;
+});
+
+/** Skin: soft mottling, faint wrinkles and very fine pores. Light and neutral, tinted per creature (goblin green, troll grey). */
+export const skinSwatch = () => memo('skin', () => {
+  const sw = paint((u, v, o) => {
+    const blot = fbm(u * 4, v * 4, 4, 4, 4, 231), fine = fbm(u * 24, v * 24, 24, 24, 2, 232), wr = smooth(0.92, 0.99, ridged(u * 6, v * 10, 6, 10, 3, 233));
+    const k = (0.9 + blot * 0.12 + fine * 0.03) * (1 - wr * 0.06);
+    o[0] = 222 * k; o[1] = 208 * k; o[2] = 196 * k; o[3] = 0.6 + fine * 0.15 - wr * 0.3;
+  });
+  const rnd = prng(234), { cg, hg, size } = sw;
+  for (let i = 0; i < 500; i++) { // pores
+    const x = rnd() * size, y = rnd() * size, r = 0.6 + rnd() * 0.6;
+    cg.fillStyle = 'rgba(110,70,60,0.06)'; cg.beginPath(); cg.arc(x, y, r, 0, Math.PI * 2); cg.fill();
+    hg.fillStyle = 'rgba(0,0,0,0.12)'; hg.beginPath(); hg.arc(x, y, r, 0, Math.PI * 2); hg.fill();
+  }
+  return sw;
+});
+
+/** Polished wood grain running along v (staffs, clubs, shafts). */
+export const woodSwatch = () => memo('wood', () => paint((u, v, o) => {
+  const warp = fbm(u * 3, v, 3, 1, 4, 241) * 2.5, ring = 0.5 + 0.5 * Math.sin((u * 6 + warp) * Math.PI * 2);
+  const fine = fbm(u * 32, v * 4, 32, 4, 2, 242), knot = smooth(0.8, 0.92, fbm(u * 4, v * 2, 4, 2, 3, 243));
+  const col = mix([104, 66, 36], [156, 108, 64], clamp01(ring * 0.6 + fine * 0.4)), k = 1 - knot * 0.25;
+  o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k; o[3] = 0.4 + ring * 0.3 + fine * 0.2 - knot * 0.3;
+}));
+
+/** Bat wing membrane: thin leathery skin with raised branching veins. */
+export const membraneSwatch = () => memo('membrane', () => paint((u, v, o) => {
+  const vein = smooth(0.9, 0.985, ridged(u * 4, v * 4, 4, 4, 4, 251)), blot = fbm(u * 6, v * 6, 6, 6, 3, 252);
+  const col = mix(mix([58, 36, 34], [92, 58, 52], blot), [128, 86, 74], vein * 0.7);
+  o[0] = col[0]; o[1] = col[1]; o[2] = col[2]; o[3] = 0.3 + vein * 0.6 + blot * 0.1;
+}));
+
+/** Soft round glow (halos around staff crystals). */
+export const glowCanvas = () => memo('glow', () => {
+  const N = 128, c = mkCanvas(N, N), g = c.getContext('2d'), gr = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.22, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.55, 'rgba(255,255,255,0.12)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, N, N);
+  return c;
+});
+
+/** A glinting five-pointed star (stunned "dizzy" stars). */
+export const starCanvas = () => memo('star', () => {
+  const N = 64, c = mkCanvas(N, N), g = c.getContext('2d');
+  g.translate(N / 2, N / 2); g.shadowColor = 'rgba(255,230,120,0.95)'; g.shadowBlur = 10;
+  g.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i & 1 ? 9 : 22; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  g.closePath();
+  const gr = g.createRadialGradient(-4, -6, 2, 0, 0, 22); gr.addColorStop(0, '#fffbe0'); gr.addColorStop(0.5, '#ffd84a'); gr.addColorStop(1, '#e09a10');
+  g.fillStyle = gr; g.fill(); g.shadowBlur = 0; g.lineWidth = 1.5; g.strokeStyle = 'rgba(120,70,0,0.8)'; g.stroke();
+  return c;
+});
+
+/** Rounded bar (health bar frame and fill); white, tinted by the sprite material. */
+export const barCanvas = () => memo('bar', () => {
+  const c = mkCanvas(64, 16);
+  roundRect(c.getContext('2d'), 1, 1, 62, 14, 6, '#ffffff');
+  return c;
+});
+
+/** `n` aura rings for a mage's feet (one per level): soft glowing circles with runic ticks and sparkles. White, tinted per element. */
+export const auraCanvas = n => memo('aura' + n, () => {
+  const N = 512, c = mkCanvas(N, N), g = c.getContext('2d'), cx = N / 2, rnd = prng(260 + n);
+  for (let i = 0; i < n; i++) {
+    // Strokes are wide enough to stay visible when the whole board is on screen (a tile is only ~50 px there)
+    const r = N * (0.42 - 0.058 * i), w = 13 - i;
+    g.shadowColor = 'rgba(255,255,255,0.9)'; g.shadowBlur = 14; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = w;
+    g.beginPath(); g.arc(cx, cx, r, 0, Math.PI * 2); g.stroke();
+    g.shadowBlur = 5; g.lineWidth = 2.2; g.strokeStyle = 'rgba(255,255,255,0.7)';
+    const ticks = 16 + i * 4;
+    for (let k = 0; k < ticks; k++) {
+      const a = (k + (i & 1) * 0.5) / ticks * Math.PI * 2, r0 = r + w / 2 + 2, r1 = r0 + (k % 4 === 0 ? 9 : 5);
+      g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cx + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cx + Math.sin(a) * r1); g.stroke();
+    }
+    g.fillStyle = 'rgba(255,255,255,0.95)';
+    for (let k = 0; k < 14; k++) {
+      const a = rnd() * Math.PI * 2, rr = r + (rnd() - 0.5) * 12, s = 1 + rnd() * 2.2;
+      g.beginPath(); g.arc(cx + Math.cos(a) * rr, cx + Math.sin(a) * rr, s, 0, Math.PI * 2); g.fill();
+    }
+  }
+  return c;
+});
+
+/** Painted shield face: a royal blue field, a gold chevron between three gold roundels, worn and scratched. */
+export const heraldryCanvas = () => memo('heraldry', () => {
+  const N = 256, c = mkCanvas(N, N), g = c.getContext('2d');
+  g.fillStyle = '#1d3a86'; g.fillRect(0, 0, N, N);
+  g.fillStyle = '#e2b24a';
+  g.beginPath(); g.moveTo(0, N * 0.62); g.lineTo(N / 2, N * 0.3); g.lineTo(N, N * 0.62); g.lineTo(N, N * 0.8); g.lineTo(N / 2, N * 0.48); g.lineTo(0, N * 0.8); g.closePath(); g.fill();
+  for (const [x, y] of [[0.3, 0.2], [0.7, 0.2], [0.5, 0.72]]) { g.beginPath(); g.arc(x * N, (1 - y) * N * 0.98, N * 0.07, 0, Math.PI * 2); g.fill(); }
+  const img = g.getImageData(0, 0, N, N), rnd = prng(281);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = (y * N + x) * 4, k = 0.82 + fbm(x / N * 6, y / N * 6, 6, 6, 4, 282) * 0.3 + vnoise(x, y, N, N, 283) * 0.06;
+    img.data[i] *= k; img.data[i + 1] *= k; img.data[i + 2] *= k;
+  }
+  g.putImageData(img, 0, 0);
+  g.strokeStyle = 'rgba(220,220,220,0.35)'; g.lineWidth = 0.8;
+  for (let i = 0; i < 40; i++) { const x = rnd() * N, y = rnd() * N, a = rnd() * Math.PI, l = 5 + rnd() * 18; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+  return c;
+});
+
+/** Blotchy noise for the death dissolve (alpha map): values 0.5..1, so lowering opacity from 1 to 0.5 eats the figure away. */
+export const dissolveCanvas = () => memo('dissolve', () => paint((u, v, o) => {
+  const n = clamp01(fbm(u * 6, v * 6, 6, 6, 4, 271) * 1.4 - 0.2), k = 128 + n * 127;
+  o[0] = o[1] = o[2] = k; o[3] = 0;
+}).col);

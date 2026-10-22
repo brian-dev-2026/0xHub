@@ -41,7 +41,7 @@ export const tileX = i => (i % BOARD_W) + 0.5 - BOARD_W / 2;
 export const tileZ = i => Math.floor(i / BOARD_W) + 0.5 - BOARD_H / 2;
 
 /**
- * createScene(canvas, rootEl, quality) → { renderer, scene, camera, sun, layout(hud), toWorld(tile), tileAt(x, y),
+ * createScene(canvas, rootEl, quality) → { renderer, scene, camera, sun, layout(hud), toWorld(tile), groundAt(x, z), tileAt(x, y),
  * loc(e), box(el), setTerrain(t), setQuality(q), render(), dispose() }.
  * `hud` gives the HUD insets in px of the (possibly turned) game frame: { top, right, bottom, left }.
  */
@@ -185,6 +185,8 @@ export function createScene(canvas, rootEl, quality) {
   }
   /** Where a unit stands on a tile: its centre at the walkable height (hill tops, stepping stones, path). */
   const toWorld = i => new THREE.Vector3(tileX(i), terrain ? terrain.standAt(i) : 0, tileZ(i));
+  /** Walking height at board-centred world x/z (ground, or a bridge deck), for units moving along the path. */
+  const groundAt = (x, z) => terrain ? terrain.heightAt(x, z) : 0;
 
   // ================= Quality =================
   function setQuality(next) {
@@ -200,7 +202,7 @@ export function createScene(canvas, rootEl, quality) {
 
   return {
     renderer, scene, camera, sun,
-    layout, tileAt, toWorld, loc, box,
+    layout, tileAt, toWorld, groundAt, loc, box,
     get rot() { return rot; },
     get quality() { return q; },
     setTerrain(t) { terrain = t; },
