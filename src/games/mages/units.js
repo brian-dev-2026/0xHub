@@ -179,7 +179,7 @@ export function createUnits(view, quality) {
     return {
       id: e.id, kind: e.kind, L, root, turn, fig, nodes, mats, bar, fill, ice, core, dizzy,
       rest: restOf(nodes, ['body', 'head', 'armL', 'armR', 'legL', 'legR', 'legFL', 'legFR', 'legBL', 'legBR', 'tail', 'wingL', 'wingR']),
-      d0: e.d, d1: e.d, tick: -1, yaw: 0, first: true, grow: 0, flash: 0, cast: 0, frozen: false, tinted: false,
+      d0: e.d, d1: e.d, tick: -1, flyT: 0, yaw: 0, first: true, grow: 0, flash: 0, cast: 0, frozen: false, tinted: false,
       phase: (e.id * 0.618) % 1 * TAU, offset: def.boss === null && e.kind !== 'sapling' ? (((e.id * 0.618) % 1) - 0.5) * 0.24 : 0,
       killed: false, fillF: 1,
     };
@@ -200,7 +200,12 @@ export function createUnits(view, quality) {
     f.tinted = fl > 0 || fr;
   }
   function updateEnemy(f, e, sim, alpha, dt) {
-    if (f.tick !== sim.tick) { f.d0 = f.first ? e.d : f.d1; f.d1 = e.d; f.tick = sim.tick; f.first = false; }
+    if (f.tick !== sim.tick) {
+      // After k ticks in one frame, start from the position one tick before the current one (no lurch)
+      const k = sim.tick - f.tick;
+      f.d0 = f.first ? e.d : k > 1 ? f.d1 + (e.d - f.d1) * (k - 1) / k : f.d1;
+      f.d1 = e.d; f.tick = sim.tick; f.first = false;
+    }
     const d = f.d0 + (f.d1 - f.d0) * alpha, L = f.L;
     pathPointInto(sim.map, d, pp, 0);
     pathPointInto(sim.map, d + 0.3, pp, 2);
@@ -210,7 +215,10 @@ export function createUnits(view, quality) {
     if (len > 1e-4) { dx /= len; dz /= len; f.yaw += wrapAngle(Math.atan2(dx, dz) - f.yaw) * (f.grow < 1 ? 1 : Math.min(1, dt * 8)); }
     const x = pp[0] - W / 2 + dz * f.offset, z = pp[1] - H / 2 - dx * f.offset;
     const ph = d * f.L.stride * TAU + f.phase, t = time + f.phase;
-    f.root.position.set(x, view.groundAt(x, z) + (L.hover ? L.hover + Math.sin(t * 3) * 0.03 : 0), z);
+    // Flyers flap and bob on their own clock, which stops while they are frozen or stunned
+    if (e.status.freezeT <= 0 && e.status.stunT <= 0) f.flyT += dt;
+    const ft = f.flyT + f.phase;
+    f.root.position.set(x, view.groundAt(x, z) + (L.hover ? L.hover + Math.sin(ft * 3) * 0.03 : 0), z);
     f.turn.rotation.y = f.yaw;
     f.grow = Math.min(1, f.grow + dt / 0.3);
     f.turn.scale.setScalar(L.scale * easeOutBack(f.grow));
@@ -238,9 +246,9 @@ export function createUnits(view, quality) {
         pose(f, 'head', Math.sin(t * 0.9) * 0.05, Math.sin(t * 0.6) * 0.2, 0);
         break;
       case 'fly': {
-        const flap = Math.sin(t * 15) * 0.75 + 0.1;
+        const flap = Math.sin(ft * 15) * 0.75 + 0.1;
         pose(f, 'wingR', 0, 0, flap); pose(f, 'wingL', 0, 0, -flap);
-        pose(f, 'body', 0.15 + Math.sin(t * 15 + 1) * 0.05, 0, 0, Math.sin(t * 15 + 1.5) * 0.012);
+        pose(f, 'body', 0.15 + Math.sin(ft * 15 + 1) * 0.05, 0, 0, Math.sin(ft * 15 + 1.5) * 0.012);
         break;
       }
       case 'stomp':
@@ -272,7 +280,10 @@ export function createUnits(view, quality) {
   // ================= Leaving (death dissolve, leak fade, mage removal) =================
   function startLeaving(f, mode) {
     if (mode === 'dissolve') {
-      for (const m of f.mats) { m.alphaMap = kit.dissolveTex; m.alphaTest = 0.5; m.transparent = false; m.needsUpdate = true; }
+      for (const m of f.mats) {
+        m.color.copy(m.userData.base.color); // drop any frost tint
+        m.alphaMap = kit.dissolveTex; m.alphaTest = 0.5; m.transparent = false; m.needsUpdate = true;
+      }
       f.fig.traverse(o => { o.castShadow = false; if (o.isSprite) o.visible = false; });
     }
     if (f.bar) f.bar.visible = false;
