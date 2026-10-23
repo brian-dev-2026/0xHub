@@ -43,7 +43,7 @@ export const tileZ = i => Math.floor(i / BOARD_W) + 0.5 - BOARD_H / 2;
 
 /**
  * createScene(canvas, rootEl, quality) → { renderer, scene, camera, sun, layout(hud), toWorld(tile), groundAt(x, z), tileAt(x, y),
- * loc(e), box(el), setTerrain(t), setQuality(q), render(), dispose() }.
+ * loc(e), box(el), zoomAt(factor, x, y), panBy(dx, dy), resetZoom(), snapshot(obj, opts), setTerrain(t), setQuality(q), render(), dispose() }.
  * `hud` gives the HUD insets in px of the (possibly turned) game frame: { top, right, bottom, left }.
  */
 export function createScene(canvas, rootEl, quality) {
@@ -118,6 +118,10 @@ export function createScene(canvas, rootEl, quality) {
   const dir = new THREE.Vector3(0, Math.sin(TILT), Math.cos(TILT));
   const tmp = new THREE.Vector3();
   let lastHud = { top: 8, right: 8, bottom: 8, left: 8 };
+  // Zoom and pan on top of the fitted framing: `fit` is the board's centre at zoom 1 (B), the free area's centre (A) and the
+  // board's projected size; the view shows screen = C + zoom * (zoom-1 point - C) - offset, so the board centre sits at A + pan
+  const ZOOM_MIN = 0.9, ZOOM_MAX = 1.8;
+  let zoom = 1, panX = 0, panY = 0, fit = null;
 
   function projectedBox() {
     camera.updateMatrixWorld(); camera.updateProjectionMatrix();
@@ -143,6 +147,7 @@ export function createScene(canvas, rootEl, quality) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
     renderer.setSize(vw, vh, false);
     camera.aspect = vw / vh;
+    camera.zoom = 1;
     camera.clearViewOffset();
     // Fit the board's bounding box into the free area: projected size scales ~1/distance, so a few passes converge
     const a = { x: lastHud.left, y: lastHud.top, w: Math.max(40, vw - lastHud.left - lastHud.right), h: Math.max(40, vh - lastHud.top - lastHud.bottom) };
@@ -154,14 +159,35 @@ export function createScene(canvas, rootEl, quality) {
     }
     camera.position.copy(dir).multiplyScalar(dist); camera.lookAt(0, 0, 0);
     b = projectedBox();
-    // Slide the view so the board's box is centred in the free area
-    camera.setViewOffset(vw, vh, (b.x0 + b.x1) / 2 - (a.x + a.w / 2), (b.y0 + b.y1) / 2 - (a.y + a.h / 2), vw, vh);
-    camera.updateProjectionMatrix();
+    // Slide the view so the board's box is centred in the free area (then apply the player's zoom and pan)
+    fit = { bx: (b.x0 + b.x1) / 2, by: (b.y0 + b.y1) / 2, ax: a.x + a.w / 2, ay: a.y + a.h / 2, bw: b.x1 - b.x0, bh: b.y1 - b.y0, aw: a.w, ah: a.h };
+    applyZoom();
     // Keep the fog beyond the board so it never dims it, then fade the surroundings into the sky
     let far = 0;
     for (const c of corners) far = Math.max(far, camera.position.distanceTo(c));
     scene.fog.near = far + 1; scene.fog.far = far + 18;
   }
+
+  /** Keeps the board covering the free area (or centred when it is smaller) and sets the camera's zoom and offset. */
+  function applyZoom() {
+    if (!fit) return;
+    const sx = Math.max(0, (zoom * fit.bw - fit.aw) / 2), sy = Math.max(0, (zoom * fit.bh - fit.ah) / 2);
+    panX = Math.max(-sx, Math.min(sx, panX)); panY = Math.max(-sy, Math.min(sy, panY));
+    camera.zoom = zoom;
+    camera.setViewOffset(vw, vh, vw / 2 + zoom * (fit.bx - vw / 2) - fit.ax - panX, vh / 2 + zoom * (fit.by - vh / 2) - fit.ay - panY, vw, vh);
+    camera.updateProjectionMatrix();
+  }
+  /** Zooms by `factor` about a point of the game frame (loc() coordinates), keeping what is under it in place. */
+  function zoomAt(factor, x, y) {
+    if (!fit) return;
+    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * factor));
+    const rx = (x - fit.ax - panX) / zoom, ry = (y - fit.ay - panY) / zoom;
+    zoom = z; panX = x - fit.ax - z * rx; panY = y - fit.ay - z * ry;
+    applyZoom();
+  }
+  /** Moves the zoomed view by a drag of (dx, dy) game-frame pixels. */
+  function panBy(dx, dy) { panX += dx; panY += dy; applyZoom(); }
+  function resetZoom() { zoom = 1; panX = 0; panY = 0; applyZoom(); }
 
   // ================= Picking =================
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), p = new THREE.Vector3();
@@ -201,9 +227,42 @@ export function createScene(canvas, rootEl, quality) {
   }
   setQuality(q);
 
+  // ================= Portraits =================
+  // A small studio (key, rim and sky fill over the same environment map) for rendering a figure to an image for the menus
+  let studio = null;
+  /** Renders `obj` (added to the studio for the shot) to a transparent PNG data URL `size` px square, supersampled 2x. */
+  function snapshot(obj, { size = 160, from = [0, 0.5, 2], at = [0, 0.35, 0], fov = 26 } = {}) {
+    if (!studio) {
+      studio = new THREE.Scene();
+      studio.environment = envTex;
+      const key = new THREE.DirectionalLight(0xfff0dc, 2.6); key.position.set(-1.4, 2.2, 2.4);
+      const rim = new THREE.DirectionalLight(0xc8dcff, 1.8); rim.position.set(1.6, 1.4, -2.2);
+      studio.add(key, rim, new THREE.HemisphereLight(0xdfe9ff, 0x3a3226, 0.55));
+    }
+    const S = size * 2, rt = new THREE.WebGLRenderTarget(S, S, { encoding: THREE.sRGBEncoding });
+    const cam = new THREE.PerspectiveCamera(fov, 1, 0.05, 20);
+    cam.position.set(...from); cam.lookAt(...at);
+    studio.add(obj);
+    const clear = renderer.getClearColor(new THREE.Color()), alpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(rt); renderer.setClearColor(0x000000, 0); renderer.clear();
+    renderer.render(studio, cam);
+    const px = new Uint8Array(S * S * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    renderer.setRenderTarget(null); renderer.setClearColor(clear, alpha);
+    studio.remove(obj); rt.dispose();
+    // WebGL rows run bottom-up
+    const img = new ImageData(S, S), row = S * 4;
+    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * row, (S - y) * row), y * row);
+    const big = Object.assign(document.createElement('canvas'), { width: S, height: S });
+    big.getContext('2d').putImageData(img, 0, 0);
+    const out = Object.assign(document.createElement('canvas'), { width: size, height: size }), g = out.getContext('2d');
+    g.imageSmoothingQuality = 'high'; g.drawImage(big, 0, 0, size, size);
+    return out.toDataURL('image/png');
+  }
+
   return {
     renderer, scene, camera, sun,
-    layout, tileAt, toWorld, groundAt, loc, box,
+    layout, tileAt, toWorld, groundAt, loc, box, zoomAt, panBy, resetZoom, snapshot,
     get rot() { return rot; },
     get quality() { return q; },
     setTerrain(t) { terrain = t; },

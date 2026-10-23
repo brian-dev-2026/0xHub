@@ -14,6 +14,8 @@ const EMBER = new THREE.Color(1, 0.42, 0.12);
 // Health bars keep a constant size on screen (sizeAttenuation off): sizes are fractions of the view's height in tan units
 const BAR_W = 0.032, BAR_H = 0.0042;
 const HOP_SECS = 0.35, POP_SECS = 0.4, DISSOLVE_SECS = 0.75, FADE_SECS = 0.3;
+/** A dragged mage floats this high over the tile under the pointer; a dropped one waits this long for its move or merge. */
+const DRAG_LIFT = 0.32, SETTLE_SECS = 0.6;
 
 const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));
 const easeOutBack = t => { const c = 1.9; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
@@ -22,7 +24,8 @@ const popScale = (kind, t) => { const k = Math.min(1, t); return kind === 'place
 const tileWorldX = t => (t % W) + 0.5 - W / 2, tileWorldZ = t => Math.floor(t / W) + 0.5 - H / 2;
 
 /**
- * createUnits(view, quality) → { sync(sim, alpha, dt?), onEvent(ev), holdDeath(ids, secs), staffAnchor(mageId), staffLights(), enemyAnchor(enemyId), dispose() }.
+ * createUnits(view, quality) → { sync(sim, alpha, dt?), onEvent(ev), holdDeath(ids, secs), dragMage(mageId, tile), dropMage(ok),
+ *   staffAnchor(mageId), staffLights(), enemyAnchor(enemyId), dispose() }.
  * `view` is createScene's result (scene, toWorld, groundAt). sync() matches the figures to sim.mages/sim.enemies; `alpha`
  * (0..1) is how far rendering is between the previous tick and the current one. `dt` (seconds since the last sync)
  * is measured when omitted. staffLights() lists the level-5 staff crystals ({ mage, anchor }) for the light pool.
@@ -38,6 +41,9 @@ export function createUnits(view, quality) {
   const holds = new Map();
   const pp = new Float64Array(6);
   let time = 0, lastNow = 0, lastSim = null;
+  /** The mage being dragged: it floats over `tile`; once dropped (`settle`) it rests there until the sim moves or merges it. */
+  let drag = null;
+  const dragTo = new THREE.Vector3();
 
   function stars(y) {
     const g = new THREE.Group();
@@ -137,9 +143,19 @@ export function createUnits(view, quality) {
     }
     if (m.tile !== f.tile) {
       const first = f.tile < 0;
+      if (drag && drag.id === f.id) drag = null; // the move landed: hop the last bit from where the drop left it
       f.tile = m.tile;
       f.to.copy(view.toWorld(m.tile));
       if (first) { f.root.position.copy(f.to); f.hop = 1; } else { f.from.copy(f.root.position); f.hop = 0; }
+    }
+    if (drag && drag.id === f.id) {
+      // Follow the pointer tile by tile; after a drop, give up waiting and hop home if the sim never took the action
+      if (drag.settle && (drag.t += dt) > SETTLE_SECS) { drag = null; f.from.copy(f.root.position); f.hop = 0; }
+      else {
+        dragTo.copy(view.toWorld(drag.tile)); dragTo.y += drag.settle ? 0 : DRAG_LIFT;
+        f.root.position.lerp(dragTo, 1 - Math.exp(-dt * 16));
+        f.hop = 1;
+      }
     }
     if (f.hop < 1) {
       f.hop = Math.min(1, f.hop + dt / HOP_SECS);
@@ -382,7 +398,7 @@ export function createUnits(view, quality) {
         seen.add(m.id);
         updateMage(f, m, dt);
       }
-      for (const [id, f] of mages) if (!seen.has(id)) { mages.delete(id); startLeaving(f, 'shrink'); }
+      for (const [id, f] of mages) if (!seen.has(id)) { mages.delete(id); startLeaving(f, 'shrink'); if (drag && drag.id === id) drag = null; }
       seen.clear();
       for (const e of sim.enemies) {
         let f = enemies.get(e.id);
@@ -438,6 +454,19 @@ export function createUnits(view, quality) {
      * the projectile or meteor that dealt it is still on screen.
      */
     holdDeath(ids, secs) { for (const id of ids) holds.set(id, Math.max(holds.get(id) ?? 0, time + secs)); },
+    /** Lifts a mage and floats it over `tile` (a drag in progress). */
+    dragMage(id, tile) { drag = { id, tile, settle: false, t: 0 }; },
+    /**
+     * Ends the drag. ok: an action was queued, so the mage rests on the drop tile until the sim moves or merges it;
+     * otherwise it hops straight back to its own tile.
+     */
+    dropMage(ok) {
+      if (!drag) return;
+      if (ok) { drag.settle = true; drag.t = 0; return; }
+      const f = mages.get(drag.id);
+      if (f) { f.from.copy(f.root.position); f.hop = 0; }
+      drag = null;
+    },
     /** The staff crystal of a mage (projectile origin, light anchor), or null. */
     staffAnchor: id => mages.get(id)?.nodes.tip ?? null,
     /** Level-5 staff crystals, which carry a constant light from Task 13's pool. */
