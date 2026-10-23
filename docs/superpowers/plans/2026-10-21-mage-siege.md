@@ -429,6 +429,46 @@ Interaction rules: tapping a shop mage enters place mode and highlights boost ti
 - [ ] **Step 5: Play-test** with Playwright as a guest: clear stage 1 (use the dev hook to speed up if needed); results show stars and the Barricade unlock; the world map shows stage 2 open. Drop a fire mage on an ice mage: it snaps back. Kill the network (route abort) before finish: the Retry message appears, and after restoring it Retry succeeds.
 - [ ] **Step 6: Commit** `"Mage Siege: controls, HUD, screens and verified run submission"`.
 
+### Task 14b: Verification that fits the Cloudflare free plan (10 ms CPU per request)
+
+**Why:** the user runs 0xHub on the Workers **free plan** and will not upgrade (personal project). Free-plan Workers and Durable Objects get about **10 ms of CPU per invocation** (requests and alarms alike). Task 10's per-wave chunks simulate a whole wave in one request: about 20 ms on average, 66–104 ms in the worst wave (Task 9b report, bundled). Those requests would fail with "exceeded CPU" on the live site. The user accepts that **the final score (and stage stars/unlocks) is confirmed with a short delay**, so verification becomes deferred and sliced: no request may simulate more than a small, bounded amount.
+
+**Files:**
+- Modify: `shared/games/mages/chunk.ts` (resumable, budgeted advance), `worker/mageChunk.ts` (queue + slice decisions, still pure), `worker/mages.ts` (MageRun: queue storage, one slice per invocation, alarm chain), `worker/mageChunk.test.ts`, `shared/games/mages/chunk.test.ts`
+- Modify: Task 14's client submission code (in `src/games/mages/ui.js` / `engine.js`, wherever Task 14 put it) and `src/pages/games/Mages.tsx` only if the API shape requires
+- Create: a bench script under `scripts/` or the scratch folder (not shipped) for the CPU measurement
+
+**Ruling R43 (binding):** free plan, deferred sliced verification as specified here; the security properties of Task 10 stay (server picks seed and config; hash checked at every chunk end; any mismatch/malformed chunk/too many actions/ahead of 2× wall clock kills the run; retries safe per R34; exactly-once recording per R34/R36; quitting rules per R33/R35/R36).
+
+**Server design:**
+1. **Upload is cheap.** `input` stores the chunk (`upTo`, `actions`, `h`, `final`) in a queue in the DO's SQLite storage after only cheap checks: owner, shape, `validateActions` against the end of the *queued* chunks (not the verified sim tick), the per-run action cap, and the 2× wall-clock check on `upTo`. No full-chunk simulation in the upload path. Duplicate/behind semantics (R34) apply against the last *queued* chunk (same `upTo` + same `h` → same ack; `upTo` below the last queued → refused without killing). The 150 s chunk-length cap (R31) can stay as an upload check.
+2. **Verification runs in slices.** A slice restores the sim (or reuses a copy cached in memory on the DO instance when warm), advances it toward the next queued chunk's `upTo` by at most a deterministic **work budget**, checks the hash when it reaches a chunk end, persists the snapshot plus the verified position, and stops. `advance` must become resumable mid-chunk: stepping to an intermediate tick with the right subset of that chunk's actions. Pure and unit-tested.
+3. **Work budget, not time.** `Date.now()` does not advance during CPU work in Workers, so budget by work units counted while stepping, e.g. Σ per tick of (1 + live enemies + mages + zones). Calibrate with a bundled (esbuild/vite, like Task 9b's bench) node benchmark over the worst late-Endless waves of the 100-wave cost run. Target: worst slice, including restore + serialize, **≤ 4 ms warm** on this machine. Report the budget, worst and median slice ms, and slices per average wave.
+4. **Cold-start and self-healing.** When the sim isn't cached in memory (a cold or evicted DO, where JIT is cold too), use a quarter budget for that slice. Before running a slice, persist an "attempt" counter. If a slice starts and finds the counter already set (the previous invocation died, e.g. CPU limit exceeded), halve the budget for this run (keep a floor) before trying again. Clear the counter after a slice commits. A slice that hit the CPU limit therefore never wedges the run.
+5. **Who drives slices:** every `input` request runs one slice after storing its chunk. A new cheap poll (`POST /api/mages/runs/:id/input` with `{ poll: true }`, or a separate `/verify` route; your choice, but keep `MagesApi` small) runs one slice and returns progress. While a backlog exists, the DO keeps an alarm about 1 s ahead that runs one slice per firing, so verification finishes even if the player closes the page. Multiplex the single alarm slot with the existing abandon timer (store the abandon deadline; the alarm decides which job is due). A run with an unverified backlog must never be discarded as abandoned until the backlog is verified or the run dies.
+6. **Responses:** uploads and polls return `{ ok: true, pending: true, verifiedTo, queuedTo }` while verification is behind. Once the final chunk is verified, they return the same final result as before (`finished`, outcome, progress, best, rank), kept for retries. A run that fails verification answers `{ ok: false, error }` to the next upload or poll.
+7. **Recording** stays exactly-once (done marker before D1 writes, `recordScoreOnce`). The slice that reaches the end of the final chunk marks the run done. D1 recording may happen in that invocation (it is I/O, not CPU) or in the next one.
+8. **Request budget sanity:** the free plan also caps requests (about 100k Worker requests per day, and Durable Object requests/alarms similarly). Report the expected request count for a 10-minute stage run and a 30-minute Endless run. It should be well within a personal project's daily limits.
+
+**Client changes:**
+- Post a chunk **about every 2 s of real time** while a wave is running (plus at `waveEnd` and the final chunk, as now). Uploads are cheap now, and frequent posts keep the verification backlog small, because each post also drives one slice. Keep the pending-batch queue and retry from Task 14 (`0xhubms.pending`).
+- **Results screen:** while the final response is `pending`, show "Verifying your score…" with a progress bar (`verifiedTo / queuedTo`) and poll about once a second. Then show stars, unlocks and Endless rank as before. If the player leaves early, nothing is lost: the alarm chain finishes and records it. Show "Your score will appear on the leaderboard in a minute" if they leave the results screen while it's still pending.
+- The world map must not unlock the next stage locally before the server confirms. After a pending stage win, refresh `progress` once verification is done (or on next mount).
+
+**Tests (TDD):**
+- Slicing equivalence: verifying the stage-1 scripted run and the 30-wave Endless run in slices of random budgets (seeded) gives exactly the same per-chunk hashes and `outcomeOf` as one `replay`.
+- Resumable advance: stopping mid-chunk and resuming, with a JSON round trip between slices, matches.
+- Queue semantics: duplicate, behind and final retry (R34) evaluated against queued chunks; a hash mismatch found in a later slice kills the run, and later uploads and polls get `ok: false`.
+- Self-healing: a set attempt counter halves the budget, down to a floor.
+- Alarm multiplexing: a backlog keeps the run alive past the abandon deadline; an idle run with an empty backlog is still discarded.
+- Existing `mageChunk.test.ts` and `chunk.test.ts` pins: replay hashes must be unchanged (sim code is not modified).
+
+**Verification:**
+- `npm run typecheck && npm test && npm run build`.
+- Bench numbers in the report.
+- Playwright: play stage 1 with the real local server (dev hook allowed for speed) and finish. The results screen shows "Verifying…" briefly, then stars and the unlock. Close the page right after finishing an Endless run with a backlog; after the alarm chain runs, the leaderboard lists the score.
+- Commit: `"Mage Siege: deferred sliced verification for the Workers free plan"`.
+
 ### Task 15: Hub integration and final verification
 
 **Files:**
