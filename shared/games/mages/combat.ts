@@ -130,10 +130,10 @@ function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
     const owner = mageById(sim, st.burnBy);
     const spread = near(sim, e, PASSIVES.burnSpreadRadius);
     for (const o of spread) applyBurn(o, st.burnDps, st.burnHit, st.burnLv, st.burnBy);
-    if (spread.length > 0) ev.push({ type: "passive", mage: st.burnBy, kind: "burnSpread", targets: spread.map((o) => o.id) });
+    if (spread.length > 0) ev.push({ type: "passive", mage: st.burnBy, kind: "burnSpread", targets: spread.map((o) => o.id), from: e.id });
     if (st.burnLv >= PASSIVES.explodeLevel) {
       const hit = near(sim, e, PASSIVES.explodeRadius);
-      ev.push({ type: "passive", mage: st.burnBy, kind: "explode", targets: hit.map((o) => o.id) });
+      ev.push({ type: "passive", mage: st.burnBy, kind: "explode", targets: hit.map((o) => o.id), from: e.id });
       for (const o of hit) damage(sim, o, st.burnHit * PASSIVES.explodeDmg, owner, ev);
     }
   }
@@ -146,7 +146,7 @@ function onDeath(sim: Sim, e: Enemy, ev: SimEvent[]): void {
       bp.t = secs(PASSIVES.venomSecs);
       bp.lv = st.poison.lv;
       bp.by = st.poison.by;
-      ev.push({ type: "passive", mage: st.poison.by, kind: "venomJump", targets: [best.id] });
+      ev.push({ type: "passive", mage: st.poison.by, kind: "venomJump", targets: [best.id], from: e.id });
     }
   }
 }

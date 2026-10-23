@@ -51,6 +51,8 @@ const LEVELS = [1, 2, 3, 4, 5] as const;
 const killEnemyForTest = (r: Rig, e: Enemy): void => reapForTest(r.sim, e, null, r.ev);
 
 const ownerOf = (r: Rig, kind: string): number => (passiveEvents(r, kind)[0] as Extract<SimEvent, { type: "passive" }>).mage;
+/** The dying enemy a death passive names. */
+const fromOf = (r: Rig, kind: string): number | undefined => (passiveEvents(r, kind)[0] as Extract<SimEvent, { type: "passive" }>).from;
 /** Adds a second mage of the same kind/level (on `tile`) and parks the first so only the second attacks. */
 function addSecond(r: Rig, tile: number): Mage {
   const m2: Mage = { ...r.m, id: r.sim.nextId++, tile, cd: 0, hits: 0 };
@@ -74,6 +76,9 @@ describe("passive owners, credit, burn strength", () => {
     expect(ownerOf(r, "burnSpread")).toBe(m2.id);
     expect(ownerOf(r, "explode")).toBe(m2.id);
     expect(m2.id).not.toBe(r.m.id);
+    // The renderer places the effect at the enemy that died
+    expect(fromOf(r, "burnSpread")).toBe(a.id);
+    expect(fromOf(r, "explode")).toBe(a.id);
   });
 
   it("burnSpread owner survives the owner being sold", () => {
@@ -100,6 +105,7 @@ describe("passive owners, credit, burn strength", () => {
     m2.cd = 0;
     combatTick(r.sim, r.ev);
     expect(ownerOf(r, "venomJump")).toBe(m2.id);
+    expect(fromOf(r, "venomJump")).toBe(a.id);
   });
 
   it("burn and venom kills credit the owner (ruins gold bonus), null once it is gone", () => {

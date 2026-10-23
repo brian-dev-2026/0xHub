@@ -12,7 +12,7 @@ const C = hex => new THREE.Color(hex);
 const LK = [0, 0.55, 0.8, 1, 1.4, 1.9];
 const SZ = lv => 1 + 0.15 * (lv - 1);
 const SHOTS = 48, STRIKES = 40, ROCKS = 24;
-/** Most points sampled along one bolt (per pass, at High; fewer at lower particle budgets), and along a fork. */
+/** Most points sampled along one bolt (per pass, at High; in proportion to lower particle budgets), and along a fork. */
 const BOLT_SAMPLES = 70, FORK_SAMPLES = 24;
 const TILT_C = Math.cos(THREE.MathUtils.degToRad(55)), TILT_S = Math.sin(THREE.MathUtils.degToRad(55));
 
@@ -126,10 +126,10 @@ export function createElementFx(k) {
     }
     // Sample budget: dense enough for a continuous core, but at most ~BOLT_SAMPLES points along any bolt, so a volley
     // of strikes cannot flush the shared particle ring (and every other live effect with it)
-    const step = Math.max(0.014 / Math.sqrt(k.q.particles), len / ((depth ? FORK_SAMPLES : BOLT_SAMPLES) * Math.sqrt(k.q.particles)));
-    // Rim and glow are spaced by distance at half their size (so overlaps stay even), the additive halo sparsely; long
+    const step = Math.max(0.014 / Math.sqrt(k.q.particles), len / ((depth ? FORK_SAMPLES : BOLT_SAMPLES) * k.q.particles));
+    // Rim and glow are spaced by distance at half their size (wider at lower particle budgets), the halo sparsely; long
     // sparse bolts put hot dots on every other sample and let the streaks join them
-    const rimGap = 0.085 * th, glowGap = 0.05 * th, haloGap = 0.12 * th, dots = step < 0.03;
+    const gs = 1 / k.q.particles, rimGap = 0.085 * th * gs, glowGap = 0.05 * th * gs, haloGap = 0.12 * th * gs, dots = step < 0.03;
     // Two passes, so every core point draws over all of the glow: first a dark violet rim and a lilac glow, then the
     // white-hot core. Reads as a bolt even on bright ground.
     for (let pass = 0; pass < 2; pass++) {
@@ -380,23 +380,16 @@ export function createElementFx(k) {
 
   // ================= Passives =================
   let lastMage = -1, lastEnemy = -1, lastShot = null, lastLv = 1;
-  // Where enemies died this tick, by id. Death passives (burn spread, explosion, venom jump) do not name the enemy that
-  // died, and one death can kill others before its own venom jump is reported, so each is placed at the death nearest
-  // to its first target (the sim picks those targets around the dying enemy).
-  const deaths = Array.from({ length: 24 }, () => ({ id: -1, tick: -1, seq: 0, p: V() }));
-  let nextDeath = 0, deathSeq = 0;
+  // Where enemies died this tick, by id: death passives name the enemy that died (`from`), and one death can kill
+  // others before its own venom jump is reported, so the position must be looked up by that id.
+  const deaths = Array.from({ length: 24 }, () => ({ id: -1, tick: -1, p: V() }));
+  let nextDeath = 0;
   const killPos = V();
-  function deathSite(targets) {
-    const tick = k.sim.tick, has = targets.length > 0 && enemyPos(targets[0], P2);
-    let best = null, bd = Infinity;
-    for (const d of deaths) {
-      if (d.tick !== tick) continue;
-      // Nearest to the first target; with no targets (an explosion that caught nobody), the latest death
-      const dd = has ? d.p.distanceToSquared(P2) : -d.seq;
-      if (dd < bd) { bd = dd; best = d; }
-    }
-    if (best) killPos.copy(best.p); else killPos.set(0, -50, 0);
-    return best;
+  function deathSite(id) {
+    const tick = k.sim.tick;
+    for (const d of deaths) if (d.tick === tick && d.id === id) { killPos.copy(d.p); return d; }
+    killPos.set(0, -50, 0);
+    return null;
   }
   // Death passives wait for the shot or meteor that made the kill to land (the figure is held until then too)
   const later = Array.from({ length: 16 }, () => ({ on: false, t: 0, kind: '', targets: [], p: V() }));
@@ -511,7 +504,7 @@ export function createElementFx(k) {
     }
   }
   function deathPassive(ev) {
-    const d = deathSite(ev.targets);
+    const d = deathSite(ev.from);
     let wait = 0;
     if (d) {
       for (const s of shots) if (s.on && s.enemy === d.id && s.kind !== 'meteor') wait = Math.max(wait, s.dur - s.t);
@@ -916,7 +909,6 @@ export function createElementFx(k) {
             }
           } else {
             lastShot = launch(m.kind, P1, ev.enemy, m.level);
-            if (lastShot) k.units.holdDeath([ev.enemy], lastShot.dur);
           }
           break;
         }
@@ -936,7 +928,9 @@ export function createElementFx(k) {
         case 'kill': {
           const d = deaths[nextDeath];
           if (!enemyPos(ev.enemy, d.p)) break;
-          d.id = ev.enemy; d.tick = k.sim.tick; d.seq = ++deathSeq; nextDeath = (nextDeath + 1) % deaths.length;
+          d.id = ev.enemy; d.tick = k.sim.tick; nextDeath = (nextDeath + 1) % deaths.length;
+          // A projectile's kill stays standing until the shot lands (living targets keep their bars updating)
+          for (const s of shots) if (s.on && s.enemy === ev.enemy && s.kind !== 'meteor') { k.units.holdDeath([ev.enemy], s.dur - s.t); break; }
           // A meteor's victims stay standing until the rock lands
           if (ev.by === null && meteorAt.t > 0 && Math.hypot(d.p.x - meteorAt.p.x, d.p.z - meteorAt.p.z) < 1.6) k.units.holdDeath([ev.enemy], meteorAt.t);
           break;

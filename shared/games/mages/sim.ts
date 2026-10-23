@@ -176,6 +176,8 @@ export type SimEvent =
       mage: number;
       kind: "burn" | "burnSpread" | "explode" | "chill" | "freeze" | "shatter" | "chain" | "armorBreak" | "quake" | "venom" | "venomJump" | "gust";
       targets: number[];
+      /** Death passives (burnSpread, explode, venomJump) only: the enemy whose death set them off. */
+      from?: number;
     }
   | { type: "cast"; mage: number; skill: MageId; level: number; target?: number; hits: number[] }
   | { type: "trapPlace"; trap: number }

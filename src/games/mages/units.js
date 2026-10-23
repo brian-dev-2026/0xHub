@@ -37,7 +37,7 @@ export function createUnits(view, quality) {
   /** Enemy id → time until which its health bar and death wait (a projectile or meteor still on its way). */
   const holds = new Map();
   const pp = new Float64Array(6);
-  let time = 0, lastNow = 0;
+  let time = 0, lastNow = 0, lastSim = null;
 
   function stars(y) {
     const g = new THREE.Group();
@@ -235,7 +235,7 @@ export function createUnits(view, quality) {
       if (m.emissive) {
         m.emissive.copy(b.emissive);
         if (fr) m.emissive.add(FROST_GLOW);
-        if (fl) m.emissive.lerp(FLASH, fl * 0.75);
+        if (fl) m.emissive.lerp(FLASH, fl * 0.4); // a warm flicker; the figure stays recognisable
       }
     }
     f.tinted = fl > 0 || fr;
@@ -365,6 +365,16 @@ export function createUnits(view, quality) {
       if (dt === undefined) { const now = performance.now(); dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 0; lastNow = now; }
       dt = Math.max(0, dt);
       time += dt;
+      if (sim !== lastSim) {
+        // A new run: ids start again at 1, so no old figure (or held death) may be matched to the new sim by id
+        if (lastSim) {
+          for (const f of enemies.values()) startLeaving(f, 'fade');
+          for (const f of mages.values()) startLeaving(f, 'shrink');
+          enemies.clear(); mages.clear();
+        }
+        holds.clear();
+        lastSim = sim;
+      }
       const seen = new Set();
       for (const m of sim.mages) {
         let f = mages.get(m.id);
@@ -423,12 +433,12 @@ export function createUnits(view, quality) {
         default: break;
       }
     },
-    /** The staff crystal of a mage (projectile origin, light anchor), or null. */
     /**
      * Keeps these enemies' health bars and death dissolves waiting for `secs`: the sim applies damage at once, while
      * the projectile or meteor that dealt it is still on screen.
      */
     holdDeath(ids, secs) { for (const id of ids) holds.set(id, Math.max(holds.get(id) ?? 0, time + secs)); },
+    /** The staff crystal of a mage (projectile origin, light anchor), or null. */
     staffAnchor: id => mages.get(id)?.nodes.tip ?? null,
     /** Level-5 staff crystals, which carry a constant light from Task 13's pool. */
     staffLights() { const out = []; for (const f of mages.values()) if (f.level === 5) out.push({ mage: f.id, anchor: f.nodes.tip }); return out; },
