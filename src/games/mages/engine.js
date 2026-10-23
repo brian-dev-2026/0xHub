@@ -103,6 +103,7 @@ export function mountMages(host, { onExit, api }) {
     if (terrain) terrain.dispose();
     terrain = buildTerrain(view.scene, map, view.quality);
     view.setTerrain(terrain);
+    fx.precompile(); // the terrain's point lights change every lit program's key
   }
   function setQuality(name) {
     const q = QUALITY[name];

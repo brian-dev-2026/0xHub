@@ -22,7 +22,7 @@ const popScale = (kind, t) => { const k = Math.min(1, t); return kind === 'place
 const tileWorldX = t => (t % W) + 0.5 - W / 2, tileWorldZ = t => Math.floor(t / W) + 0.5 - H / 2;
 
 /**
- * createUnits(view, quality) → { sync(sim, alpha, dt?), onEvent(ev), staffAnchor(mageId), staffLights(), enemyAnchor(enemyId), dispose() }.
+ * createUnits(view, quality) → { sync(sim, alpha, dt?), onEvent(ev), holdDeath(ids, secs), staffAnchor(mageId), staffLights(), enemyAnchor(enemyId), dispose() }.
  * `view` is createScene's result (scene, toWorld, groundAt). sync() matches the figures to sim.mages/sim.enemies; `alpha`
  * (0..1) is how far rendering is between the previous tick and the current one. `dt` (seconds since the last sync)
  * is measured when omitted. staffLights() lists the level-5 staff crystals ({ mage, anchor }) for the light pool.
@@ -34,6 +34,8 @@ export function createUnits(view, quality) {
   view.scene.add(group);
   const plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
   const mages = new Map(), enemies = new Map(), leaving = [];
+  /** Enemy id → time until which its health bar and death wait (a projectile or meteor still on its way). */
+  const holds = new Map();
   const pp = new Float64Array(6);
   let time = 0, lastNow = 0;
 
@@ -306,7 +308,7 @@ export function createUnits(view, quality) {
     if (f.dizzy.visible) f.dizzy.rotation.y = time * 4;
     f.flash = Math.max(0, f.flash - dt / 0.16);
     tintEnemy(f);
-    if (f.bar) {
+    if (f.bar && !(holds.get(f.id) > time)) {
       const frac = Math.max(0, Math.min(1, e.hp / e.maxHp));
       if (frac !== f.fillF) {
         // Sprites face the camera, so the fill is anchored to the bar's left end in screen space through its centre
@@ -378,7 +380,9 @@ export function createUnits(view, quality) {
         seen.add(e.id);
         updateEnemy(f, e, sim, alpha, dt);
       }
-      for (const [id, f] of enemies) if (!seen.has(id)) { enemies.delete(id); startLeaving(f, f.killed ? 'dissolve' : 'fade'); }
+      // A held enemy that died stands where it was until the hit that killed it lands
+      for (const [id, f] of enemies) if (!seen.has(id) && !(holds.get(id) > time)) { enemies.delete(id); startLeaving(f, f.killed ? 'dissolve' : 'fade'); }
+      for (const [id, until] of holds) if (until <= time) holds.delete(id);
       updateLeaving(dt);
       // New kinds joined the keeper: compile now (with the scene's lights, which are part of each program's key)
       if (keepDirty) { keepDirty = false; view.renderer.compile(view.scene, view.camera); }
@@ -420,6 +424,11 @@ export function createUnits(view, quality) {
       }
     },
     /** The staff crystal of a mage (projectile origin, light anchor), or null. */
+    /**
+     * Keeps these enemies' health bars and death dissolves waiting for `secs`: the sim applies damage at once, while
+     * the projectile or meteor that dealt it is still on screen.
+     */
+    holdDeath(ids, secs) { for (const id of ids) holds.set(id, Math.max(holds.get(id) ?? 0, time + secs)); },
     staffAnchor: id => mages.get(id)?.nodes.tip ?? null,
     /** Level-5 staff crystals, which carry a constant light from Task 13's pool. */
     staffLights() { const out = []; for (const f of mages.values()) if (f.level === 5) out.push({ mage: f.id, anchor: f.nodes.tip }); return out; },
@@ -431,7 +440,7 @@ export function createUnits(view, quality) {
       for (const f of mages.values()) removeFigure(f);
       for (const f of enemies.values()) removeFigure(f);
       for (const l of leaving) removeFigure(l.f);
-      mages.clear(); enemies.clear(); leaving.length = 0;
+      mages.clear(); enemies.clear(); holds.clear(); leaving.length = 0;
       view.scene.remove(group);
       plane.dispose();
       kit.dispose();

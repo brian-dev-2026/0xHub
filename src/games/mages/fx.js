@@ -328,7 +328,11 @@ export function createFx(view, units, quality) {
 
   /** Emits one particle; c0 → c1 over its life, size s0 → s1, peak alpha a. Returns its index (for orbit()). */
   function emit(P, x, y, z, vx, vy, vz, life, s0, s1, c0, c1, a, grav = 0, drag = 0, cell = CELL.GLOW, flags = 0) {
-    const i = P.next, k = i * 3;
+    // Take the next free slot (a short probe), so a burst of short-lived sparks does not overwrite long-lived snow,
+    // smoke or clouds; only a full ring recycles a live particle
+    let i = P.next;
+    for (let n = 0; n < 48 && P.life[i] > 0; n++) i = (i + 1) % P.N;
+    const k = i * 3;
     P.next = (i + 1) % P.N;
     if (P.life[i] <= 0) P.live++;
     P.pos[k] = x; P.pos[k + 1] = y; P.pos[k + 2] = z;
@@ -848,11 +852,20 @@ export function createFx(view, units, quality) {
     }
   }
 
-  // Compile every effect program now (with this pool's lights), so the first cast does not hitch
-  renderer.compile(scene, view.camera);
+  // Compile every effect program now (with this pool's lights), so the first cast does not hitch. The terrain adds
+  // its own point lights later (they are part of each lit program's key), so the engine calls precompile() again then.
+  const precompile = () => renderer.compile(scene, view.camera);
+  precompile();
 
   return {
     get shakeOffset() { return shakeOffset; },
+    precompile,
+    /** Live particle counts and capacities (for checks). */
+    stats() {
+      const cells = {};
+      for (let i = 0; i < S.N; i++) if (S.life[i] > 0) cells[S.cell[i]] = (cells[S.cell[i]] || 0) + 1;
+      return { solid: S.live, solidMax: S.N, additive: A.live, additiveMax: A.N, solidByCell: cells };
+    },
     shake,
     onEvent(ev, s) {
       sim = s;

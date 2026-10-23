@@ -12,6 +12,9 @@ const C = hex => new THREE.Color(hex);
 const LK = [0, 0.55, 0.8, 1, 1.4, 1.9];
 const SZ = lv => 1 + 0.15 * (lv - 1);
 const SHOTS = 48, STRIKES = 40, ROCKS = 24;
+/** Most points sampled along one bolt (per pass, at High; fewer at lower particle budgets), and along a fork. */
+const BOLT_SAMPLES = 70, FORK_SAMPLES = 24;
+const TILT_C = Math.cos(THREE.MathUtils.degToRad(55)), TILT_S = Math.sin(THREE.MathUtils.degToRad(55));
 
 const PAL = {
   fire: { hot: C(0xfff2a8), flame: C(0xffc04a), mid: C(0xffa020), deep: C(0xd8300a), dark: C(0x7a1404), smoke: C(0x3a3230), smoke2: C(0x6a625c), ember: C(0xffb030), glow: C(0xff6a1a) },
@@ -108,7 +111,8 @@ export function createElementFx(k) {
   const BA = [V(), V()], BB = [V(), V()], BD = V(), BU = V(), BW = V(), BS = V(), BF = V(), BT = V();
   function bolt(a, b, lv, o = {}) {
     const depth = o.depth ?? 0, BP = BPS[depth], pa = BA[depth].copy(a), pb = BB[depth].copy(b);
-    const th = (o.thick ?? 1) * (0.75 + 0.12 * lv), pal = PAL.lightning, life = o.life ?? 0.16;
+    // Callers pick the thickness (capped): higher levels grow through forks and re-strikes, not girth
+    const th = Math.min(1.3, o.thick ?? 1), pal = PAL.lightning, life = o.life ?? 0.16;
     const Dl = BD.subVectors(pb, pa), len = Dl.length();
     if (len < 1e-3) return;
     const n = Math.min(23, Math.max(6, Math.round(len * 7)));
@@ -120,19 +124,31 @@ export function createElementFx(k) {
       const t = i / n, env = Math.sin(t * Math.PI);
       BP[i].copy(pa).addScaledVector(Dl, t).addScaledVector(BU, (Math.random() - 0.5) * 2 * amp * env).addScaledVector(BW, (Math.random() - 0.5) * 2 * amp * env);
     }
-    const step = 0.014 / Math.sqrt(k.q.particles);
+    // Sample budget: dense enough for a continuous core, but at most ~BOLT_SAMPLES points along any bolt, so a volley
+    // of strikes cannot flush the shared particle ring (and every other live effect with it)
+    const step = Math.max(0.014 / Math.sqrt(k.q.particles), len / ((depth ? FORK_SAMPLES : BOLT_SAMPLES) * Math.sqrt(k.q.particles)));
+    // Rim and glow are spaced by distance at half their size (so overlaps stay even), the additive halo sparsely; long
+    // sparse bolts put hot dots on every other sample and let the streaks join them
+    const rimGap = 0.085 * th, glowGap = 0.05 * th, haloGap = 0.12 * th, dots = step < 0.03;
     // Two passes, so every core point draws over all of the glow: first a dark violet rim and a lilac glow, then the
     // white-hot core. Reads as a bolt even on bright ground.
     for (let pass = 0; pass < 2; pass++) {
+      let run = 0, rim = 0, gl = 0, halo = 0;
       for (let i = 0; i < n; i++) {
         BS.subVectors(BP[i + 1], BP[i]);
-        const segs = Math.max(1, Math.ceil(BS.length() / step));
-        for (let j = 0; j < segs; j++) {
+        const sl = BS.length(), segs = Math.max(1, Math.ceil(sl / step));
+        for (let j = 0; j < segs; j++, run += sl / segs) {
           const t = j / segs, x = BP[i].x + BS.x * t, y = BP[i].y + BS.y * t, z = BP[i].z + BS.z * t;
-          if (pass === 1) { emit(S, x, y, z, 0, 0, 0, life, 0.06 * th, 0.045 * th, pal.hot, pal.spark, 1, 0, 0, CELL.EMBER); continue; }
-          if (j % 3 === 0) emit(S, x, y, z, 0, 0, 0, life, 0.17 * th, 0.12 * th, pal.deep, pal.dark, 0.32, 0, 0, CELL.GLOW);
-          if (j % 2 === 0) emit(S, x, y, z, 0, 0, 0, life, 0.1 * th, 0.075 * th, pal.glow, pal.deep, 0.6, 0, 0, CELL.GLOW);
-          if (j % 5 === 0) emit(A, x, y, z, 0, 0, 0, life * 1.2, 0.24 * th, 0.18 * th, pal.glow, pal.deep, 0.4, 0, 0, CELL.GLOW);
+          if (pass === 1) {
+            // A hot dot plus a streak turned along the channel on screen, so sparse samples still join into a line
+            if (dots || j % 2 === 0) emit(S, x, y, z, 0, 0, 0, life, 0.06 * th, 0.045 * th, pal.hot, pal.spark, 1, 0, 0, CELL.EMBER);
+            const q = emit(S, x, y, z, 0, 0, 0, life, Math.max(0.06 * th, step * 2.6), step * 2.2, pal.hot, pal.spark, 1, 0, 0, CELL.STREAK);
+            S.ext[q * 4 + 3] = Math.atan2(BS.y * TILT_C - BS.z * TILT_S, BS.x);
+            continue;
+          }
+          if (run >= rim) { rim = run + rimGap; emit(S, x, y, z, 0, 0, 0, life, 0.17 * th, 0.12 * th, pal.deep, pal.dark, 0.3, 0, 0, CELL.GLOW); }
+          if (run >= gl) { gl = run + glowGap; emit(S, x, y, z, 0, 0, 0, life, 0.1 * th, 0.075 * th, pal.glow, pal.deep, 0.55, 0, 0, CELL.GLOW); }
+          if (run >= halo) { halo = run + haloGap; emit(A, x, y, z, 0, 0, 0, life * 1.2, 0.24 * th, 0.18 * th, pal.glow, pal.deep, 0.12, 0, 0, CELL.GLOW); }
         }
       }
     }
@@ -142,7 +158,7 @@ export function createElementFx(k) {
       const i = 1 + Math.floor(Math.random() * (n - 2));
       BF.copy(BP[i]);
       BT.copy(BF).addScaledVector(BD.subVectors(pb, pa), rnd(0.08, 0.2)).add(BS.set(rnd(-1, 1), rnd(-0.6, 0.2), rnd(-1, 1)).multiplyScalar(len * 0.16));
-      bolt(BF, BT, lv, { thick: th * 0.45, life, depth: 1, jag: 0.14 });
+      bolt(BF, BT, lv, { thick: th * 0.5, life, depth: 1, jag: 0.14 });
     }
   }
   function sparks(p, n, speed, c0, c1, life = 0.4) {
@@ -152,13 +168,14 @@ export function createElementFx(k) {
     }
   }
   // Thunder re-strikes: a bolt from the sky flickers two or three times before it fades
-  const strikes = Array.from({ length: STRIKES }, () => ({ on: false, t: 0, a: V(), id: 0, b: V(), lv: 1, left: 0 }));
-  function strike(id, lv, delay) {
+  const strikes = Array.from({ length: STRIKES }, () => ({ on: false, t: 0, a: V(), id: 0, b: V(), lv: 1, left: 0, lit: false }));
+  /** A thunder strike on enemy `id` after `delay` seconds; `lit`: it gets a pool light (only the first few do). */
+  function strike(id, lv, delay, lit) {
     const s = strikes.find(o => !o.on);
     if (!s) return;
     if (!enemyPos(id, s.b)) return;
     s.a.set(s.b.x + rnd(-0.6, 0.6), s.b.y + 4.2, s.b.z - rnd(0.6, 1.4));
-    Object.assign(s, { on: true, t: -delay, id, lv, left: lv >= 4 ? 3 : 2 });
+    Object.assign(s, { on: true, t: delay, id, lv, left: lv >= 4 ? 3 : 2, lit });
   }
   function stepStrikes(dt) {
     for (const s of strikes) {
@@ -167,20 +184,20 @@ export function createElementFx(k) {
       if (s.t > 0) continue;
       enemyPos(s.id, s.b);
       const first = s.left === (s.lv >= 4 ? 3 : 2);
-      bolt(s.a, s.b, s.lv, { thick: 1.6 + s.lv * 0.12, life: 0.12, jag: 0.06, forks: s.lv >= 3 ? 2 : 1 });
-      if (first) thunderHit(s.b, s.lv);
+      bolt(s.a, s.b, s.lv, { thick: 1.1 + s.lv * 0.04, life: 0.12, jag: 0.06, forks: s.lv >= 3 ? 2 : 1 });
+      if (first) thunderHit(s.b, s.lv, s.lit);
       s.left--; s.t = rnd(0.06, 0.12);
       if (s.left <= 0) s.on = false;
     }
   }
-  function thunderHit(p, lv) {
+  function thunderHit(p, lv, lit) {
     const pal = PAL.lightning, g = surface(p.x, p.z);
-    flash(p.x, p.y + 0.6, p.z, pal.glow, 2.5 + lv * 0.7, 0.35, 4 + lv * 0.4);
+    if (lit) flash(p.x, p.y + 0.6, p.z, pal.glow, Math.min(2.5, 1.5 + lv * 0.2), 0.35, 3 + lv * 0.3);
     decal(DECAL.SCORCH, p.x, p.z, 0.32 + 0.04 * lv, 2.5, C(0x241a30), C(0x241a30), { fade: 0.8, alpha: 0.9 });
     decal(DECAL.SHOCK, p.x, p.z, 0.5 + lv * 0.1, 0.35, pal.mid, pal.deep);
     P1.set(p.x, g + 0.05, p.z);
     sparks(P1, 14 + lv * 6, 1.6, pal.hot, pal.mid);
-    emit(A, p.x, p.y, p.z, 0, 0, 0, 0.25, 0.9 + lv * 0.15, 1.2, pal.glow, pal.deep, 0.9);
+    emit(A, p.x, p.y, p.z, 0, 0, 0, 0.25, 0.4 + lv * 0.02, 0.5, pal.glow, pal.deep, 0.5);
     for (let i = 0; i < count(6 + lv * 2); i++) emit(S, p.x + rnd(-0.1, 0.1), g + 0.05, p.z + rnd(-0.1, 0.1), rnd(-0.3, 0.3), rnd(0.2, 0.5), rnd(-0.3, 0.3), rnd(0.6, 1), 0.15, 0.4, C(0x4a4250), C(0x8a8490), 0.55, 0, 1.5, CELL.PUFF, SOFT);
   }
 
@@ -363,7 +380,34 @@ export function createElementFx(k) {
 
   // ================= Passives =================
   let lastMage = -1, lastEnemy = -1, lastShot = null, lastLv = 1;
+  // Where enemies died this tick, by id. Death passives (burn spread, explosion, venom jump) do not name the enemy that
+  // died, and one death can kill others before its own venom jump is reported, so each is placed at the death nearest
+  // to its first target (the sim picks those targets around the dying enemy).
+  const deaths = Array.from({ length: 24 }, () => ({ id: -1, tick: -1, seq: 0, p: V() }));
+  let nextDeath = 0, deathSeq = 0;
   const killPos = V();
+  function deathSite(targets) {
+    const tick = k.sim.tick, has = targets.length > 0 && enemyPos(targets[0], P2);
+    let best = null, bd = Infinity;
+    for (const d of deaths) {
+      if (d.tick !== tick) continue;
+      // Nearest to the first target; with no targets (an explosion that caught nobody), the latest death
+      const dd = has ? d.p.distanceToSquared(P2) : -d.seq;
+      if (dd < bd) { bd = dd; best = d; }
+    }
+    if (best) killPos.copy(best.p); else killPos.set(0, -50, 0);
+    return best;
+  }
+  // Death passives wait for the shot or meteor that made the kill to land (the figure is held until then too)
+  const later = Array.from({ length: 16 }, () => ({ on: false, t: 0, kind: '', targets: [], p: V() }));
+  function stepLater(dt) {
+    for (const r of later) {
+      if (!r.on || (r.t -= dt) > 0) continue;
+      r.on = false;
+      killPos.copy(r.p);
+      deathEffect(r.kind, r.targets);
+    }
+  }
   function passive(kind, targets, lv, origin) {
     const sz = SZ(lv), lk = LK[lv];
     switch (kind) {
@@ -414,7 +458,7 @@ export function createElementFx(k) {
         if (!enemyPos(origin, P3)) break;
         for (const id of targets) {
           if (!enemyPos(id, P2)) continue;
-          bolt(P3, P2, lv, { thick: 0.95, life: 0.22, jag: 0.14, forks: lv >= 4 ? 1 : 0 });
+          bolt(P3, P2, lv, { thick: 0.85 + 0.1 * (lv - 1), life: 0.22, jag: 0.14, forks: lv >= 4 ? 1 : 0 });
           sparks(P2, 5 + lv * 2, 1, PAL.lightning.hot, PAL.lightning.mid, 0.3);
           P3.copy(P2);
         }
@@ -467,10 +511,24 @@ export function createElementFx(k) {
     }
   }
   function deathPassive(ev) {
-    const lv = ev.kind === 'burnSpread' ? 3 : 5; // spread needs L3+, the rest L5
-    switch (ev.kind) {
+    const d = deathSite(ev.targets);
+    let wait = 0;
+    if (d) {
+      for (const s of shots) if (s.on && s.enemy === d.id && s.kind !== 'meteor') wait = Math.max(wait, s.dur - s.t);
+      if (meteorAt.t > 0 && Math.hypot(d.p.x - meteorAt.p.x, d.p.z - meteorAt.p.z) < 1.6) wait = Math.max(wait, meteorAt.t);
+    }
+    const r = wait > 0.02 && later.find(o => !o.on);
+    if (r) {
+      r.on = true; r.t = wait; r.kind = ev.kind; r.p.copy(killPos);
+      r.targets.length = 0;
+      for (const id of ev.targets) r.targets.push(id);
+    } else deathEffect(ev.kind, ev.targets);
+  }
+  function deathEffect(kind, targets) {
+    const lv = kind === 'burnSpread' ? 3 : 5; // spread needs L3+, the rest L5
+    switch (kind) {
       case 'burnSpread':
-        for (const id of ev.targets) { const s = launch('burnJump', killPos, id, lv); if (!s) break; }
+        for (const id of targets) { const s = launch('burnJump', killPos, id, lv); if (!s) break; }
         break;
       case 'explode': {
         const P = PAL.fire, p = killPos, g = surface(p.x, p.z);
@@ -484,7 +542,7 @@ export function createElementFx(k) {
         break;
       }
       case 'venomJump':
-        for (const id of ev.targets) launch('venomJump', killPos, id, lv);
+        for (const id of targets) launch('venomJump', killPos, id, lv);
         break;
       default: break;
     }
@@ -538,9 +596,9 @@ export function createElementFx(k) {
         break;
       }
       case 'lightning': {
-        ev.hits.forEach((id, i) => strike(id, lv, i * 0.04));
+        ev.hits.forEach((id, i) => strike(id, lv, i * 0.05, i < 3));
         if (lv >= 4) shake(lv === 5 ? 0.6 : 0.4);
-        if (lv === 5) tint(WHITE, 0.18, 0.18, 0, 0.02);
+        if (lv === 5) tint(PAL.lightning.glow, 0.05, 0.2, 0, 0.03);
         if (!ev.hits.length && magePos(ev.mage, P1)) sparks(P1, 20, 1.2, PAL.lightning.hot, PAL.lightning.mid);
         break;
       }
@@ -797,8 +855,15 @@ export function createElementFx(k) {
   }
 
   // ================= Meteor and Root Slam =================
+  /** The falling meteor's target (world) and seconds until it lands, for holding its victims' deaths. */
+  const meteorAt = { p: V(), t: 0 };
   function meteor(tile) {
     if (!tilePos(tile, P1)) return;
+    meteorAt.p.copy(P1); meteorAt.t = 0.55;
+    // Survivors keep their health bars until the impact too
+    const held = [];
+    for (const e of k.sim.enemies) if (enemyPos(e.id, P2) && Math.hypot(P2.x - P1.x, P2.z - P1.z) < 1.6) held.push(e.id);
+    k.units.holdDeath(held, 0.55);
     P2.set(P1.x - 1.5, P1.y + 4, P1.z - 1.6);
     const s = launch('meteor', P2, 0, 5, P1);
     if (!s) { meteorImpact(P1); return; }
@@ -844,12 +909,15 @@ export function createElementFx(k) {
           lastLv = m.level;
           if (m.kind === 'lightning') {
             if (enemyPos(ev.enemy, P2)) {
-              bolt(P1, P2, m.level, { thick: 0.85, life: 0.16 });
+              bolt(P1, P2, m.level, { thick: 0.75 + 0.1 * (m.level - 1), life: 0.16 });
               sparks(P2, 4 + m.level * 2, 0.9, PAL.lightning.hot, PAL.lightning.mid, 0.3);
               emit(A, P2.x, P2.y, P2.z, 0, 0, 0, 0.15, 0.4 + m.level * 0.05, 0.6, PAL.lightning.glow, PAL.lightning.deep, 0.8);
               if (m.level >= 4) flash(P2.x, P2.y + 0.3, P2.z, PAL.lightning.glow, m.level === 5 ? 1.6 : 1, 0.18, 3);
             }
-          } else lastShot = launch(m.kind, P1, ev.enemy, m.level);
+          } else {
+            lastShot = launch(m.kind, P1, ev.enemy, m.level);
+            if (lastShot) k.units.holdDeath([ev.enemy], lastShot.dur);
+          }
           break;
         }
         case 'passive': {
@@ -865,11 +933,20 @@ export function createElementFx(k) {
           break;
         }
         case 'cast': cast(ev); break;
-        case 'kill': if (!enemyPos(ev.enemy, killPos)) killPos.set(0, -50, 0); break;
+        case 'kill': {
+          const d = deaths[nextDeath];
+          if (!enemyPos(ev.enemy, d.p)) break;
+          d.id = ev.enemy; d.tick = k.sim.tick; d.seq = ++deathSeq; nextDeath = (nextDeath + 1) % deaths.length;
+          // A meteor's victims stay standing until the rock lands
+          if (ev.by === null && meteorAt.t > 0 && Math.hypot(d.p.x - meteorAt.p.x, d.p.z - meteorAt.p.z) < 1.6) k.units.holdDeath([ev.enemy], meteorAt.t);
+          break;
+        }
         default: break;
       }
     },
     update(dt) {
+      meteorAt.t = Math.max(0, meteorAt.t - dt);
+      stepLater(dt);
       for (const s of shots) if (s.on) fly(s, dt);
       stepStrikes(dt);
       stepPillars(dt);
