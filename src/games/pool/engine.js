@@ -5,7 +5,8 @@ import * as THREE from 'three';
 const FONT_HREF = 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap';
 
 const CSS = `
-/* Layout: full-bleed WebGL table; glass HUD hugs the edges (cards top, power left, spin + fine aim right; bottom bar in portrait) */
+/* Layout: always landscape like the mobile classic. Full-bleed WebGL table; glass HUD hugs the edges (cards top, power left, spin + fine aim right).
+   A phone held upright gets the whole game turned sideways (.rot) instead of a squeezed portrait layout. */
 :host {
   --bg: #0b0d0e;
   --glass: rgba(17, 19, 21, 0.7);
@@ -20,7 +21,8 @@ const CSS = `
   color-scheme: dark;
 }
 [hidden] { display: none !important; }
-.root { position: fixed; inset: 0; overflow: hidden; background: var(--bg); color: var(--fg); font-family: var(--body); -webkit-tap-highlight-color: transparent; }
+.root { --sa-top: env(safe-area-inset-top, 0px); --sa-right: env(safe-area-inset-right, 0px); --sa-bottom: env(safe-area-inset-bottom, 0px); --sa-left: env(safe-area-inset-left, 0px);
+  position: fixed; inset: 0; overflow: hidden; background: var(--bg); color: var(--fg); font-family: var(--body); -webkit-tap-highlight-color: transparent; }
 #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
 button { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -40,7 +42,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 
 /* ---------- Top bar ---------- */
 .topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "p0 mid p1"; gap: 12px; align-items: center;
-  padding-block: calc(10px + env(safe-area-inset-top, 0px)) 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: calc(10px + var(--sa-top)) 10px; padding-left: max(16px, var(--sa-left)); padding-right: max(16px, var(--sa-right));
   background: linear-gradient(rgba(11,13,14,.9), rgba(11,13,14,0)); pointer-events: none; }
 .topbar > * { pointer-events: auto; }
 .pcard { position: relative; overflow: hidden; }
@@ -66,7 +68,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .ibtn svg { width: 18px; height: 18px; }
 
 /* ---------- Power (landscape: vertical on the left) ---------- */
-.power { position: fixed; z-index: 4; left: max(16px, env(safe-area-inset-left, 0px)); top: 50%; transform: translateY(-38%); width: 64px; height: min(58vh, 380px);
+.power { position: fixed; z-index: 4; left: max(16px, var(--sa-left)); top: 50%; transform: translateY(-38%); width: 64px; height: min(58vh, 380px);
   border-radius: 20px; display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 8px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
 .power .track { position: relative; flex: 1; width: 28px; border-radius: 14px; background: rgba(0,0,0,.45); overflow: hidden; box-shadow: inset 0 2px 8px rgba(0,0,0,.6); }
 .power .fill { position: absolute; left: 0; right: 0; top: 0; height: calc(var(--p, 0) * 100%); background: linear-gradient(#f1d58f, #d8b26a 40%, #e2734a 85%, #ef5b5b); opacity: .9; }
@@ -75,45 +77,49 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2
 .power[aria-disabled="true"], .wheel[aria-disabled="true"], .spinbtn[aria-disabled="true"] { opacity: .4; pointer-events: none; }
 
 /* ---------- Right column ---------- */
-.spinbtn { position: fixed; z-index: 4; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 78px); width: 64px; padding: 8px 0 7px; border-radius: 20px;
+.spinbtn { position: fixed; z-index: 4; right: max(16px, var(--sa-right)); top: calc(var(--sa-top) + 78px); width: 64px; padding: 8px 0 7px; border-radius: 20px;
   display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
 .cueball { --x: 0; --y: 0; position: relative; border-radius: 50%; background: radial-gradient(circle at 34% 30%, #fff 0 8%, #f3eee0 30%, #d7d0bf 70%, #a69e8c); box-shadow: inset -3px -5px 10px rgba(0,0,0,.25), 0 3px 10px rgba(0,0,0,.4); }
 .cueball.sm { width: 40px; height: 40px; }
 .cueball .hit { position: absolute; width: 22%; height: 22%; border-radius: 50%; background: #e23b3b; box-shadow: 0 0 0 2px rgba(255,255,255,.7);
   left: calc(50% + var(--x) * 50% - 11%); top: calc(50% - var(--y) * 50% - 11%); }
-.wheel { position: fixed; z-index: 4; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 10px); top: 50%; transform: translateY(-30%); width: 44px; height: min(44vh, 280px);
+.wheel { position: fixed; z-index: 4; right: calc(max(16px, var(--sa-right)) + 10px); top: 50%; transform: translateY(-30%); width: 44px; height: min(44vh, 280px);
   border-radius: 14px; touch-action: none; cursor: ns-resize; overflow: hidden; --o: 0px;
   background: linear-gradient(90deg, rgba(0,0,0,.55), rgba(255,255,255,.06) 50%, rgba(0,0,0,.55)), repeating-linear-gradient(0deg, #2b2f33 0 3px, #15171a 3px 9px); background-position: 0 0, 0 var(--o); }
 
 /* ---------- Toast ---------- */
-.toast { position: fixed; z-index: 6; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 74px); transform: translate(-50%, -8px); opacity: 0; pointer-events: none;
+.toast { position: fixed; z-index: 6; left: 50%; top: calc(var(--sa-top) + 74px); transform: translate(-50%, -8px); opacity: 0; pointer-events: none;
   padding: 10px 18px; border-radius: 14px; font-weight: 600; font-size: 15px; max-width: min(92vw, 520px); text-align: center; transition: opacity .25s, transform .25s; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 .toast.bad { border-color: rgba(239,91,91,.55); }
 
-/* ---------- Portrait layout ---------- */
-.root.portrait .topbar { grid-template-columns: 1fr 1fr; grid-template-areas: "p0 p1" "mid mid"; row-gap: 8px; }
-.root.portrait .pcard { justify-self: stretch; }
-.root.portrait .mid { justify-self: center; }
-.root.portrait .topbar:has(#card1[hidden]) #card0 { grid-column: 1 / -1; }
-.root.portrait .pballs .mb { width: 13px; height: 13px; }
-.root.portrait .pballs .mb::after { inset: 3.5px; }
-.root.portrait .power { top: auto; transform: none; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: max(16px, env(safe-area-inset-left, 0px)); right: calc(max(16px, env(safe-area-inset-right, 0px)) + 76px);
-  width: auto; height: 64px; flex-direction: row; padding: 0 14px 0 10px; }
-.root.portrait .power .track { height: 28px; width: auto; flex: 1; }
-.root.portrait .power .fill { top: 0; bottom: 0; left: auto; right: 0; height: auto; width: calc(var(--p, 0) * 100%); background: linear-gradient(270deg, #f1d58f, #d8b26a 40%, #e2734a 85%, #ef5b5b); }
-.root.portrait .power canvas { top: 50%; left: auto; right: 6px; width: auto; height: 14px; transform: translate(calc(var(--p, 0) * -55%), -50%); }
-.root.portrait .spinbtn { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); height: 64px; padding: 0; justify-content: center; }
-.root.portrait .spinbtn .label { display: none; }
-.root.portrait .wheel { top: auto; transform: none; right: max(16px, env(safe-area-inset-right, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 90px);
-  width: auto; height: 34px; cursor: ew-resize;
-  background: linear-gradient(rgba(0,0,0,.55), rgba(255,255,255,.06) 50%, rgba(0,0,0,.55)), repeating-linear-gradient(90deg, #2b2f33 0 3px, #15171a 3px 9px); background-position: 0 0, var(--o) 0; }
-.root.portrait .toast { top: calc(env(safe-area-inset-top, 0px) + 128px); }
+/* ---------- Sideways (phone held upright) ---------- */
+/* layout() sizes and turns .root; safe areas follow the turn: local top = screen right, local left = screen top */
+.root.rot { inset: auto; top: 0; left: 0; transform-origin: 0 0; --sa-top: env(safe-area-inset-right, 0px); --sa-right: env(safe-area-inset-bottom, 0px); --sa-bottom: env(safe-area-inset-left, 0px); --sa-left: env(safe-area-inset-top, 0px); }
+
+/* ---------- Short screens (phones in landscape): slimmer HUD so the table gets the height ---------- */
+.root.short .topbar { padding-block: calc(5px + var(--sa-top)) 4px; gap: 8px; }
+.root.short .pcard { padding: 4px 10px 4px 4px; border-radius: 12px; gap: 8px; }
+.root.short .pcard.p1 { padding: 4px 4px 4px 10px; }
+.root.short .av { width: 28px; height: 28px; border-radius: 9px; font-size: 14px; }
+.root.short .pname { font-size: 14px; }
+.root.short .pinfo { gap: 2px; }
+.root.short .pballs .mb { width: 11px; height: 11px; }
+.root.short .pballs .mb::after { inset: 3px; }
+.root.short .pill { padding: 6px 12px; font-size: 13px; }
+.root.short .ibtn { width: 32px; height: 32px; border-radius: 10px; }
+.root.short .power { width: 52px; height: auto; top: calc(56px + var(--sa-top)); bottom: calc(10px + var(--sa-bottom)); transform: none; border-radius: 16px; padding: 8px 0; }
+.root.short .power .track { width: 22px; }
+.root.short .spinbtn { width: 52px; top: calc(56px + var(--sa-top)); border-radius: 16px; padding: 6px 0; }
+.root.short .cueball.sm { width: 32px; height: 32px; }
+.root.short .wheel { width: 36px; right: calc(max(16px, var(--sa-right)) + 8px); top: calc(140px + var(--sa-top)); bottom: calc(10px + var(--sa-bottom)); height: auto; transform: none; }
+.root.short .toast { top: calc(var(--sa-top) + 50px); }
+.root.short .screen { padding-block: calc(12px + var(--sa-top)) calc(12px + var(--sa-bottom)); }
 
 /* ---------- Screens & sheets ---------- */
 .menu-card { margin-top: auto; }
-.screen { position: fixed; inset: 0; z-index: 8; display: flex; align-items: flex-start; padding-block: calc(24px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-bottom, 0px));
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+.screen { position: fixed; inset: 0; z-index: 8; display: flex; align-items: flex-start; padding-block: calc(24px + var(--sa-top)) calc(24px + var(--sa-bottom));
+  padding-left: max(16px, var(--sa-left)); padding-right: max(16px, var(--sa-right));
   background: radial-gradient(120% 90% at 0% 100%, rgba(11,13,14,.92) 20%, rgba(11,13,14,0) 70%); overflow-y: auto; }
 .menu-card { width: min(460px, 100%); border-radius: 24px; padding: 26px; display: flex; flex-direction: column; gap: 18px; }
 .brandline { display: flex; align-items: center; gap: 10px; }
@@ -142,7 +148,7 @@ h1 { margin: 0; font-family: var(--display); font-weight: 700; font-size: clamp(
 .equipped .meta b { font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: .03em; }
 .equipped .meta span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(5,6,7,.55); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(5,6,7,.55); padding-left: max(16px, var(--sa-left)); padding-right: max(16px, var(--sa-right)); }
 .sheet { width: min(380px, 100%); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 14px; background: var(--glass-hi); }
 .sheet h2 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 30px; letter-spacing: .01em; }
 .sheet p { margin: 0; color: var(--muted); line-height: 1.5; }
@@ -153,8 +159,8 @@ h1 { margin: 0; font-family: var(--display); font-weight: 700; font-size: clamp(
 .spinread { display: flex; justify-content: space-between; font-family: var(--display); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; color: var(--muted); }
 
 .locker { position: fixed; z-index: 11; top: 0; right: 0; bottom: 0; width: min(460px, 100%); display: flex; flex-direction: column; background: var(--glass-hi); border-left: 1px solid var(--line);
-  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); padding-block: calc(18px + env(safe-area-inset-top, 0px)) calc(18px + env(safe-area-inset-bottom, 0px));
-  padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); gap: 14px; box-sizing: border-box; }
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); padding-block: calc(18px + var(--sa-top)) calc(18px + var(--sa-bottom));
+  padding-left: 18px; padding-right: max(18px, var(--sa-right)); gap: 14px; box-sizing: border-box; }
 .locker header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .locker h2 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 30px; }
 .skins { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; overflow-y: auto; padding: 2px; align-content: start; }
@@ -322,6 +328,11 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     { id: 'glacier', name: 'Glacier', tag: 'Pro', shaft: { wood: 'maple' }, joint: CHROME, fore: { points: { base: { color: '#eef3f7' }, inlay: '#4fb6e8' } }, wrap: { color: '#21415a', rough: 0.55 }, sleeve: { color: '#eef3f7', rough: 0.2, coat: 1 }, cap: CHROME },
     { id: 'rosewood', name: 'Rosewood', tag: 'Classic', shaft: { wood: 'maple' }, joint: BRASS, fore: { points: { base: { wood: 'rosewood' }, inlay: '#e5cf9d' } }, wrap: { color: '#2a1a12', rough: 0.7 }, sleeve: { wood: 'rosewood' }, cap: BRASS },
     { id: 'chrome', name: 'Chrome Reaper', tag: 'Modern', shaft: { color: '#2a2d31', rough: 0.25, coat: 1 }, joint: CHROME, fore: { color: '#cfd4da', metal: 1, rough: 0.12 }, wrap: { color: '#0b0b0b', rough: 0.6 }, sleeve: { color: '#3a3d42', metal: 1, rough: 0.2 }, cap: CHROME },
+    { id: 'solar', name: 'Solar Radiant', tag: 'Legend', shaft: { wood: 'maple' }, joint: { color: '#ffd56b', glow: 1 }, fore: { points: { base: { color: '#f7f1e1' }, inlay: '#d4af37' } }, wrap: { color: '#efe2c0', rough: 0.55 }, sleeve: { color: '#f7f1e1', rough: 0.2, coat: 1 }, cap: { color: '#ffd56b', glow: 1 } },
+    { id: 'inferno', name: 'Inferno', tag: 'Legend', shaft: { color: '#1a1210', rough: 0.3, coat: 1 }, joint: { color: '#ff6a12', glow: 1 }, fore: { neon: { base: '#120806', glow: '#ff5a12' } }, wrap: { color: '#0d0907', rough: 0.6 }, sleeve: { neon: { base: '#120806', glow: '#ffb02e' } }, cap: { color: '#ff3b0a', glow: 1 } },
+    { id: 'blizzard', name: 'Blizzard', tag: 'Pro', shaft: { color: '#eaf3f9', rough: 0.25, coat: 1 }, joint: CHROME, fore: { points: { base: { color: '#ffffff' }, inlay: '#8fd3ff' } }, wrap: { color: '#cfe6f5', rough: 0.6 }, sleeve: { color: '#ffffff', rough: 0.2, coat: 1 }, cap: { color: '#bfeaff', glow: 1 } },
+    { id: 'thunder', name: 'Thunder God', tag: 'Legend', shaft: { color: '#1b2233', rough: 0.3, coat: 1 }, joint: { color: '#7fc8ff', glow: 1 }, fore: { neon: { base: '#0a0f1c', glow: '#6fc3ff' } }, wrap: { color: '#0b0e16', rough: 0.6 }, sleeve: { neon: { base: '#0a0f1c', glow: '#b98cff' } }, cap: { color: '#7fc8ff', glow: 1 } },
+    { id: 'diamond', name: 'Diamond Shine', tag: 'Lux', shaft: { color: '#f4f6f8', rough: 0.15, coat: 1 }, joint: CHROME, fore: { color: '#e8edf2', metal: 1, rough: 0.08 }, wrap: { color: '#8e9aa6', rough: 0.5 }, sleeve: { color: '#dfe5ea', metal: 1, rough: 0.1 }, cap: { color: '#ffffff', glow: 1 } },
   ];
   const TABLES = [
     { id: 'club', name: 'Club Green', tag: 'Classic', cloth: '#1b5a40', rail: { wood: 'walnut' }, irons: '#c9a45c' },
@@ -340,6 +351,11 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     glacier: { kind: 'frost', color: '#bfeaff', label: 'Frost' },
     rosewood: { kind: 'dust', color: '#ffb35c', label: 'Ember dust' },
     chrome: { kind: 'wisp', color: '#9d6bff', label: 'Phantom wisps' },
+    solar: { kind: 'radiant', color: '#ffd56b', label: 'Radiant light' },
+    inferno: { kind: 'fire', color: '#ff6a12', label: 'Blazing fire' },
+    blizzard: { kind: 'snow', color: '#dff4ff', label: 'Snowfall' },
+    thunder: { kind: 'bolt', color: '#8fd0ff', label: 'Lightning' },
+    diamond: { kind: 'shine', color: '#ffffff', label: 'Diamond shine' },
   };
   const TABLE_FX = {
     pro: { kind: 'crest', color: '#9cc4ff', crest: '#cfe0ff', label: 'Felt crest' },
@@ -613,10 +629,15 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
       m.position.y = y + len / 2; stickInner.add(m); y += len;
       if (spec.neon || spec.glow) cueGlowMats.push(m.material);
     }
-    cueFx = CUE_FX[c.id] || null; fxRing = null;
+    cueFx = CUE_FX[c.id] || null; fxRing = null; fxBolt = null;
     if (cueFx && cueFx.kind === 'ring') {
       fxRing = new THREE.Mesh(new THREE.TorusGeometry(0.012, 0.0016, 10, 40), new THREE.MeshBasicMaterial({ color: cueFx.color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
       fxRing.rotation.x = Math.PI / 2; stickInner.add(fxRing);
+    }
+    if (cueFx && cueFx.kind === 'bolt') {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BOLT_N * 3), 3));
+      fxBolt = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xe8f6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+      fxBolt.frustumCulled = false; fxBolt.visible = false; stickInner.add(fxBolt);
     }
     skin.cue = c.id; store.set('cue', c.id); drawPowerCue(); updateEquipped();
   }
@@ -695,7 +716,23 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.renderOrder = 5; scene.add(pts);
     return { N, size, mat, geo, pos, col, vel: new Float32Array(N * 3), base: new Float32Array(N * 3), life: new Float32Array(N), max: new Float32Array(N), grav: new Float32Array(N), tw: new Uint8Array(N), next: 0 };
   }
-  const fxSmall = particles(900, 0.014), fxBig = particles(260, 0.045);
+  // Additive glow only ever brightens (orange on green felt turns yellow-green), so flames and snow are
+  // drawn with normal blending and a per-particle alpha instead
+  function solidParticles(N, size) {
+    const P = particles(N, size), alpha = new Float32Array(N);
+    P.geo.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1));
+    P.mat = new THREE.ShaderMaterial({
+      uniforms: { map: { value: glowSprite }, size: { value: size }, scale: { value: 300 } },
+      vertexShader: 'attribute float alpha; varying vec3 vC; varying float vA; uniform float size; uniform float scale;\n' +
+        'void main() { vC = color; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * scale / -mv.z; gl_Position = projectionMatrix * mv; }',
+      fragmentShader: 'uniform sampler2D map; varying vec3 vC; varying float vA;\nvoid main() { gl_FragColor = vec4(vC, texture2D(map, gl_PointCoord).a * vA); }',
+      vertexColors: true, transparent: true, depthWrite: false,
+    });
+    Object.defineProperty(P.mat, 'size', { set(v) { P.mat.uniforms.size.value = v * renderer.getPixelRatio(); } });
+    scene.children.find(o => o.geometry === P.geo).material = P.mat;
+    P.alpha = alpha; return P;
+  }
+  const fxSmall = particles(900, 0.014), fxBig = particles(400, 0.045), fxSolid = solidParticles(1400, 0.05);
   const fxColor = new THREE.Color();
   function emit(P, x, y, z, vx, vy, vz, color, life, grav = 0, tw = 0) {
     const i = P.next, k = i * 3; P.next = (i + 1) % P.N;
@@ -707,13 +744,15 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     for (let i = 0; i < P.N; i++) {
       if (P.life[i] <= 0) continue;
       const k = i * 3; P.life[i] -= dt;
-      if (P.life[i] <= 0) { P.pos[k + 1] = -50; P.col[k] = P.col[k + 1] = P.col[k + 2] = 0; continue; }
+      if (P.life[i] <= 0) { P.pos[k + 1] = -50; P.col[k] = P.col[k + 1] = P.col[k + 2] = 0; if (P.alpha) P.alpha[i] = 0; continue; }
       P.vel[k + 1] += P.grav[i] * dt; P.pos[k] += P.vel[k] * dt; P.pos[k + 1] += P.vel[k + 1] * dt; P.pos[k + 2] += P.vel[k + 2] * dt;
       const t = P.life[i] / P.max[i]; let a = Math.min(1, t * 2.5) * Math.min(1, (1 - t) * 8);
       if (P.tw[i]) a *= 0.35 + 0.65 * Math.abs(Math.sin(now * 0.012 + i * 1.7));
-      P.col[k] = P.base[k] * a; P.col[k + 1] = P.base[k + 1] * a; P.col[k + 2] = P.base[k + 2] * a;
+      if (P.alpha) { P.alpha[i] = a; P.col[k] = P.base[k]; P.col[k + 1] = P.base[k + 1]; P.col[k + 2] = P.base[k + 2]; }
+      else { P.col[k] = P.base[k] * a; P.col[k + 1] = P.base[k + 1] * a; P.col[k + 2] = P.base[k + 2] * a; }
     }
     P.geo.attributes.position.needsUpdate = true; P.geo.attributes.color.needsUpdate = true;
+    if (P.alpha) P.geo.attributes.alpha.needsUpdate = true;
   }
   const rnd = (a, b) => a + Math.random() * (b - a);
   function burst(x, y, z, color, n, speed) {
@@ -721,17 +760,55 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     emit(fxBig, x, y + 0.01, z, 0, 0, 0, color, 0.25);
   }
 
-  // Cue effects: particles emitted along the stick, an energy ring, pulsing neon
-  let cueFx = null, cueGlowMats = [], fxRing = null, emitAcc = 0;
-  const fxV = new THREE.Vector3();
+  // Cue effects: particles emitted along the stick, an energy ring, lightning bolts, pulsing glow
+  const BOLT_N = 18;
+  let cueFx = null, cueGlowMats = [], fxRing = null, fxBolt = null, boltT = 0, boltNext = 0, emitAcc = 0;
+  const fxV = new THREE.Vector3(), fxD = new THREE.Vector3();
   function alongStick(s, r = 0.016) { const a = Math.random() * Math.PI * 2; return stick.localToWorld(fxV.set(Math.cos(a) * r, s, Math.sin(a) * r)); }
+  // A point on the stick surface (fxV) and the outward direction from the stick there (fxD)
+  function stickRay(s, r = 0.014) {
+    const a = Math.random() * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+    stick.localToWorld(fxD.set(c * (r + 1), s, sn * (r + 1))); stick.localToWorld(fxV.set(c * r, s, sn * r)); fxD.sub(fxV);
+    return fxV;
+  }
+  // Redraw the jagged bolt between two points on the stick and light it up with glow and sparks
+  function strike() {
+    // Usually it crawls along the stick; sometimes it arcs off into the air beside it
+    const p = fxBolt.geometry.attributes.position, s0 = rnd(0.02, 0.9), s1 = Math.min(1.44, s0 + rnd(0.3, 0.7)), a0 = Math.random() * Math.PI * 2, twist = rnd(-3, 3), arc = Math.random() < 0.4 ? rnd(0.04, 0.09) : 0;
+    for (let i = 0; i < BOLT_N; i++) {
+      const t = i / (BOLT_N - 1), a = a0 + t * twist + rnd(-0.5, 0.5), r = 0.013 + Math.sin(t * Math.PI) * arc + (i && i < BOLT_N - 1 ? rnd(0, 0.045) : 0);
+      p.setXYZ(i, Math.cos(a) * r, s0 + (s1 - s0) * t, Math.sin(a) * r);
+    }
+    p.needsUpdate = true;
+    stickInner.updateMatrixWorld();
+    // A 1px line barely shows over the felt, so trace the bolt with a dense chain of solid points
+    for (let i = 0; i < BOLT_N - 1; i++) for (let j = 0; j < 8; j++) {
+      const t = j / 8, w = stickInner.localToWorld(fxV.set(p.getX(i) + (p.getX(i + 1) - p.getX(i)) * t, p.getY(i) + (p.getY(i + 1) - p.getY(i)) * t, p.getZ(i) + (p.getZ(i + 1) - p.getZ(i)) * t));
+      emit(fxSolid, w.x, w.y, w.z, 0, 0, 0, Math.random() < 0.6 ? '#eaf7ff' : '#6fb8ff', 0.2);
+      if (i % 4 === 0 && j === 0) emit(fxBig, w.x, w.y, w.z, 0, 0, 0, '#5aa8ff', 0.14);
+    }
+    for (let k = 0; k < 10; k++) emit(fxSolid, fxV.x, fxV.y, fxV.z, rnd(-0.25, 0.25), rnd(0, 0.25), rnd(-0.25, 0.25), '#cfeaff', rnd(0.15, 0.3), -0.6);
+  }
   function cueEffects(dt, now) {
     if (!cueFx) return;
-    const f = cueFx, rate = { sparkle: 45, embers: 60, frost: 40, neon: 30, dust: 18, wisp: 22, ring: 12 }[f.kind] || 0;
+    const f = cueFx, rate = { sparkle: 45, embers: 60, frost: 40, neon: 30, dust: 18, wisp: 22, ring: 12, radiant: 200, fire: 260, snow: 120, bolt: 60, shine: 70 }[f.kind] || 0;
     if (f.kind === 'neon') { const p = 1.1 + 0.9 * Math.sin(now * 0.006); for (const m of cueGlowMats) m.emissiveIntensity = p; }
+    if (f.kind === 'radiant') { const p = 1.4 + 1.0 * Math.sin(now * 0.004); for (const m of cueGlowMats) m.emissiveIntensity = p; }
+    if (f.kind === 'fire') { const p = 1.2 + Math.random() * 0.9; for (const m of cueGlowMats) m.emissiveIntensity = p; }
     if (fxRing) { const t = (now * 0.0007) % 1, y = 1.42 - t * 1.38; fxRing.position.y = y; const r = 0.0105 - (1.42 - y) / 1.42 * 0.004 + 0.003; fxRing.scale.setScalar(r / 0.012); fxRing.material.opacity = Math.sin(t * Math.PI); }
-    if (!stick.visible) return;
+    if (!stick.visible) { if (fxBolt) fxBolt.visible = false; return; }
     stick.updateMatrixWorld();
+    if (fxBolt) {
+      boltT -= dt; boltNext -= dt;
+      if (boltNext <= 0) { strike(); boltT = 0.14; boltNext = Math.random() < 0.35 ? 0.16 : rnd(0.3, 0.7); }
+      fxBolt.visible = boltT > 0; fxBolt.material.opacity = 0.6 + 0.4 * Math.random();
+      const p = boltT > 0 ? 3.2 : 0.9 + 0.3 * Math.sin(now * 0.004); for (const m of cueGlowMats) m.emissiveIntensity = p;
+    }
+    // Diamond: a bright sweep runs down the stick every couple of seconds
+    if (f.kind === 'shine') {
+      const t = (now * 0.001) % 2.2;
+      if (t < 0.5) for (let k = 0; k < 4; k++) { const p = alongStick(0.05 + t / 0.5 * 1.39 + rnd(-0.02, 0.02), rnd(0.008, 0.02)); emit(fxSolid, p.x, p.y, p.z, 0, 0, 0, k ? '#ffffff' : '#cfe8ff', 0.25); }
+    }
     emitAcc += dt * rate;
     while (emitAcc >= 1) {
       emitAcc--;
@@ -742,6 +819,33 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
       else if (f.kind === 'dust') { const p = alongStick(rnd(0.3, 1.44), 0.025); emit(fxSmall, p.x, p.y, p.z, rnd(-0.01, 0.01), rnd(0.01, 0.04), rnd(-0.01, 0.01), f.color, rnd(1, 1.8), 0, 1); }
       else if (f.kind === 'wisp') { const p = alongStick(rnd(0.4, 1.44), 0.02); emit(fxBig, p.x, p.y, p.z, rnd(-0.03, 0.03), rnd(0.03, 0.07), rnd(-0.03, 0.03), Math.random() < 0.6 ? f.color : '#4b2a9e', rnd(0.8, 1.4)); }
       else if (f.kind === 'ring' && fxRing) { const p = stick.localToWorld(fxV.set(0, fxRing.position.y, 0)); emit(fxSmall, p.x, p.y, p.z, rnd(-0.05, 0.05), rnd(-0.05, 0.05), rnd(-0.05, 0.05), f.color, 0.35); }
+      else if (f.kind === 'radiant') {
+        // Rays of light shooting straight out of the stick, with a soft golden halo
+        if (Math.random() < 0.55) { const p = stickRay(rnd(0.05, 1.42)), v = rnd(0.1, 0.2); emit(fxSolid, p.x, p.y, p.z, fxD.x * v, fxD.y * v, fxD.z * v, Math.random() < 0.5 ? '#fff1b8' : '#ffc94a', rnd(0.35, 0.6), 0, 1); }
+        else if (Math.random() < 0.8) { const p = alongStick(rnd(0.05, 1.42), rnd(0.008, 0.02)); emit(fxSolid, p.x, p.y, p.z, 0, rnd(0, 0.01), 0, '#ffe08a', rnd(0.3, 0.5)); }
+        else { const p = alongStick(rnd(0.05, 1.42), 0.01); emit(fxBig, p.x, p.y, p.z, 0, rnd(0, 0.01), 0, '#c99a3a', rnd(0.5, 0.8)); }
+      } else if (f.kind === 'fire') {
+        // Flames licking up the whole stick: red and orange tongues, yellow cores and the odd spark
+        const p = alongStick(rnd(0.05, 1.44), rnd(0.006, 0.02)), x = p.x, y = p.y, z = p.z, hot = Math.random() < 0.3;
+        emit(fxSolid, x, y, z, rnd(-0.04, 0.04), rnd(0.1, 0.22), rnd(-0.04, 0.04), hot ? '#ffd23a' : ['#d81e08', '#ff3d0c', '#ff6a12', '#ff8a1f'][Math.random() * 4 | 0], hot ? rnd(0.15, 0.3) : rnd(0.25, 0.45));
+        if (Math.random() < 0.08) emit(fxSolid, x, y, z, rnd(-0.1, 0.1), rnd(0.2, 0.4), rnd(-0.1, 0.1), '#ffb02e', rnd(0.6, 1), -0.3, 1);
+      } else if (f.kind === 'snow') {
+        // Flakes drift down around the stick on a light breeze, with a cold mist
+        const p = alongStick(rnd(0.05, 1.42), rnd(0.015, 0.07));
+        // (started high and falling slowly so they melt before sinking into the felt near the tip)
+        if (Math.random() < 0.85) emit(Math.random() < 0.8 ? fxSolid : fxSmall, p.x, p.y + rnd(0.03, 0.09), p.z, rnd(-0.01, 0.04), rnd(-0.03, -0.012), rnd(-0.03, 0.03), Math.random() < 0.7 ? '#ffffff' : '#cfeeff', rnd(1.2, 2), 0, 1);
+        else emit(fxBig, p.x, p.y, p.z, rnd(-0.01, 0.01), rnd(-0.01, 0.01), rnd(-0.01, 0.01), '#4f8fb8', rnd(0.8, 1.2));
+      } else if (f.kind === 'bolt') {
+        // Static crackle between strikes: blue sparks snapping off the stick
+        const p = stickRay(rnd(0.05, 1.42), 0.014), v = rnd(0.1, 0.3);
+        emit(fxSolid, p.x, p.y, p.z, fxD.x * v, fxD.y * v, fxD.z * v, Math.random() < 0.5 ? '#bfe6ff' : '#5aa8ff', rnd(0.06, 0.14));
+      }
+      else if (f.kind === 'shine') {
+        // Star glints popping on the polished surface
+        const p = alongStick(rnd(0.05, 1.42), 0.013);
+        if (Math.random() < 0.3) emit(fxBig, p.x, p.y, p.z, 0, 0, 0, '#ffffff', rnd(0.15, 0.25));
+        else emit(fxSolid, p.x, p.y, p.z, 0, rnd(0, 0.01), 0, Math.random() < 0.6 ? '#ffffff' : '#d6ecff', rnd(0.4, 0.7), 0, 1);
+      }
     }
   }
 
@@ -1027,13 +1131,11 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     $('spinTxt').textContent = v; $('spinTxt2').textContent = s;
   }
   function drawPowerCue() {
-    const c = CUES.find(x => x.id === skin.cue) || CUES[0], cnv = $('powerCue'), portrait = rootEl.classList.contains('portrait');
+    const c = CUES.find(x => x.id === skin.cue) || CUES[0], cnv = $('powerCue');
     const len = 420, th = 28;
-    cnv.width = portrait ? len : th; cnv.height = portrait ? th : len;
-    cnv.style.width = portrait ? 'auto' : '14px'; cnv.style.height = portrait ? '14px' : 'auto';
+    cnv.width = th; cnv.height = len;
     const g = cnv.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cnv.width, cnv.height);
-    if (portrait) { g.translate(0, th / 2); drawCue2D(g, c, len, th * 0.9); }
-    else { g.translate(th / 2, 0); g.rotate(-Math.PI / 2); g.translate(-len, 0); drawCue2D(g, c, len, th * 0.9); }
+    g.translate(th / 2, 0); g.rotate(-Math.PI / 2); g.translate(-len, 0); drawCue2D(g, c, len, th * 0.9);
   }
   function updateEquipped() {
     const c = CUES.find(x => x.id === skin.cue), t = TABLES.find(x => x.id === skin.table);
@@ -1233,18 +1335,31 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
   // ================= Camera =================
   const goalPos = new THREE.Vector3(), goalLook = new THREE.Vector3(), curLook = new THREE.Vector3();
   let menuT = 0, viewOff = { x: 0, y: 0 }, topH = 4, area = null, tableVertical = false;
+  // Like the mobile classic the game is landscape only: a touch screen held upright gets the whole game turned
+  // 90° clockwise, so screen points and rects are mapped into that turned frame before use
+  let rot = false, vw = window.innerWidth, vh = window.innerHeight;
+  const loc = e => rot ? { x: e.clientY, y: window.innerWidth - e.clientX } : { x: e.clientX, y: e.clientY };
+  const box = el => {
+    const r = el.getBoundingClientRect();
+    if (!rot) return r;
+    const left = r.top, top = window.innerWidth - r.right;
+    return { left, top, width: r.height, height: r.width, right: left + r.height, bottom: top + r.width };
+  };
+  const coarse = window.matchMedia('(pointer: coarse)');
   function layout() {
-    // The phone layout (controls along the bottom) is only for real phones held upright
-    const portrait = window.innerWidth < 480 && window.innerHeight > window.innerWidth;
-    rootEl.classList.toggle('portrait', portrait);
-    drawPowerCue();
-    const w = window.innerWidth, h = window.innerHeight;
-    renderer.setSize(w, h, false); camera.aspect = w / h;
+    rot = coarse.matches && window.innerHeight > window.innerWidth;
+    vw = rot ? window.innerHeight : window.innerWidth; vh = rot ? window.innerWidth : window.innerHeight;
+    rootEl.classList.toggle('rot', rot);
+    Object.assign(rootEl.style, rot
+      ? { width: vw + 'px', height: vh + 'px', transform: `translateX(${window.innerWidth}px) rotate(90deg)` }
+      : { width: '', height: '', transform: '' });
+    rootEl.classList.toggle('short', vh < 560);
+    const w = vw, h = vh;
+    renderer.setSize(w, h, false); camera.aspect = w / h; fxSolid.mat.uniforms.scale.value = h / 2;
     if (hud.hidden) { area = null; camera.updateProjectionMatrix(); return; }
-    const top = shadow.querySelector('.topbar').getBoundingClientRect().bottom + 6;
-    let a;
-    if (portrait) { const bottom = Math.min(wheelEl.getBoundingClientRect().top, powerEl.getBoundingClientRect().top) - 8; a = { x: 8, y: top, w: w - 16, h: bottom - top }; }
-    else { const left = powerEl.getBoundingClientRect().right + 10, right = Math.min(spinBtn.getBoundingClientRect().left, wheelEl.getBoundingClientRect().left) - 10; a = { x: left, y: top, w: right - left, h: h - top - 10 }; }
+    const top = box(shadow.querySelector('.topbar')).bottom + 6;
+    const left = box(powerEl).right + 10, right = Math.min(box(spinBtn).left, box(wheelEl).left) - 10;
+    const a = { x: left, y: top, w: right - left, h: h - top - 10 };
     area = a;
     // Stand the table upright whenever that makes it bigger in the space between the controls
     const ex = L + 0.2, ey = W + 0.2;
@@ -1274,7 +1389,7 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
     if (camera.fov !== fov) { camera.fov = fov; }
     // Small windows push the overhead camera far back; keep the fog beyond the table so it never dims it
     scene.fog.near = top ? topH + 2 : 4; scene.fog.far = top ? topH + 12 : 11;
-    if (top && area) camera.setViewOffset(window.innerWidth, window.innerHeight, viewOff.x, viewOff.y, window.innerWidth, window.innerHeight);
+    if (top && area) camera.setViewOffset(vw, vh, viewOff.x, viewOff.y, vw, vh);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
     const k = 1 - Math.exp(-dt * (G.phase === 'menu' ? 2 : 6));
@@ -1284,48 +1399,48 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
   // ================= Input =================
   const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -R), hitP = new THREE.Vector3(), ndc = new THREE.Vector2();
   function worldAt(x, y) {
-    const r = canvas.getBoundingClientRect(); ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+    const r = box(canvas); ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera); return ray.ray.intersectPlane(plane, hitP) ? { x: hitP.x, y: hitP.z } : null;
   }
   let drag = null;
   canvas.addEventListener('pointerdown', e => {
     ensureAudio(); if (!canAct()) return;
-    const p = worldAt(e.clientX, e.clientY);
+    const pt = loc(e), p = worldAt(pt.x, pt.y);
     if (p && onEight(G.cur)) {
       const i = POCKETS.findIndex(pk => Math.hypot(pk.sx - p.x, pk.sy - p.y) < 0.11);
       if (i >= 0) { G.call = i; G.callManual = true; return; }
     }
     canvas.setPointerCapture(e.pointerId);
-    if (G.bih && p && Math.hypot(p.x - cue.x, p.y - cue.y) < 0.08) drag = { kind: 'place', x: e.clientX };
-    else { drag = { kind: 'aim', x: e.clientX }; if (view === 'top' && p) aim = Math.atan2(p.y - cue.y, p.x - cue.x); }
+    if (G.bih && p && Math.hypot(p.x - cue.x, p.y - cue.y) < 0.08) drag = { kind: 'place', x: pt.x };
+    else { drag = { kind: 'aim', x: pt.x }; if (view === 'top' && p) aim = Math.atan2(p.y - cue.y, p.x - cue.x); }
   });
   canvas.addEventListener('pointermove', e => {
     if (!drag || !canAct()) return;
+    const pt = loc(e);
     if (drag.kind === 'place') {
-      const p = worldAt(e.clientX, e.clientY);
+      const p = worldAt(pt.x, pt.y);
       if (p) {
         const kitchen = G.bih === 'kitchen';
         const x = Math.max(-(L - R), Math.min(kitchen ? HEAD : L - R, p.x)), y = Math.max(-(W - R), Math.min(W - R, p.y));
         if (validPlace(x, y, kitchen)) { cue.x = x; cue.y = y; syncPrev(cue); }
         if (G.isBreak) aim = Math.atan2(-cue.y, FOOT - cue.x);
       }
-    } else if (view === 'top') { const p = worldAt(e.clientX, e.clientY); if (p && Math.hypot(p.x - cue.x, p.y - cue.y) > 0.01) aim = Math.atan2(p.y - cue.y, p.x - cue.x); }
-    else aim += (e.clientX - drag.x) * 0.0035;
-    drag.x = e.clientX;
+    } else if (view === 'top') { const p = worldAt(pt.x, pt.y); if (p && Math.hypot(p.x - cue.x, p.y - cue.y) > 0.01) aim = Math.atan2(p.y - cue.y, p.x - cue.x); }
+    else aim += (pt.x - drag.x) * 0.0035;
+    drag.x = pt.x;
   });
   const endDrag = () => { drag = null; };
   canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
 
-  // Power: pull back (down in landscape, left in portrait) and release
+  // Power: pull back (down) and release
   let pdrag = null;
   powerEl.addEventListener('pointerdown', e => {
     if (!canAct()) return; ensureAudio(); powerEl.setPointerCapture(e.pointerId);
-    const r = powerEl.querySelector('.track').getBoundingClientRect();
-    pdrag = { x: e.clientX, y: e.clientY, len: rootEl.classList.contains('portrait') ? r.width : r.height };
+    pdrag = { y: loc(e).y, len: box(powerEl.querySelector('.track')).height };
   });
   powerEl.addEventListener('pointermove', e => {
     if (!pdrag) return;
-    const d = rootEl.classList.contains('portrait') ? pdrag.x - e.clientX : e.clientY - pdrag.y;
+    const d = loc(e).y - pdrag.y;
     power = Math.max(0, Math.min(1, d / (pdrag.len * 0.8)));
   });
   const powerUp = () => { if (!pdrag) return; pdrag = null; if (canAct()) shoot(); };
@@ -1334,11 +1449,11 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
 
   // Fine aim wheel
   let wdrag = null, wheelOff = 0;
-  wheelEl.addEventListener('pointerdown', e => { if (!canAct()) return; wheelEl.setPointerCapture(e.pointerId); wdrag = { x: e.clientX, y: e.clientY }; });
+  wheelEl.addEventListener('pointerdown', e => { if (!canAct()) return; wheelEl.setPointerCapture(e.pointerId); wdrag = loc(e).y; });
   wheelEl.addEventListener('pointermove', e => {
-    if (!wdrag || !canAct()) return;
-    const portrait = rootEl.classList.contains('portrait'), d = portrait ? e.clientX - wdrag.x : wdrag.y - e.clientY;
-    aim += d * 0.0009; wheelOff += d; wheelEl.style.setProperty('--o', wheelOff + 'px'); wdrag = { x: e.clientX, y: e.clientY };
+    if (wdrag == null || !canAct()) return;
+    const y = loc(e).y, d = wdrag - y;
+    aim += d * 0.0009; wheelOff += d; wheelEl.style.setProperty('--o', wheelOff + 'px'); wdrag = y;
   });
   wheelEl.addEventListener('pointerup', () => { wdrag = null; }); wheelEl.addEventListener('pointercancel', () => { wdrag = null; });
 
@@ -1347,7 +1462,7 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
   const big = $('bigBall');
   let sdrag = false;
   const setSpinFrom = e => {
-    const r = big.getBoundingClientRect(); let x = ((e.clientX - r.left) / r.width) * 2 - 1, y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+    const r = box(big), pt = loc(e); let x = ((pt.x - r.left) / r.width) * 2 - 1, y = -(((pt.y - r.top) / r.height) * 2 - 1);
     const m = Math.hypot(x, y); if (m > 0.8) { x *= 0.8 / m; y *= 0.8 / m; }
     spin = { x, y }; setSpinUI();
   };
@@ -1535,9 +1650,9 @@ export function mountPool(host, { onExit, onResult = () => {} }) {
       stick.position.set(cue.x, R + 0.004, cue.y).addScaledVector(back, R + gap);
     }
     // Effects: particles are sized in world units, so scale them up for the distant overhead camera
-    if (!G.paused) { cueEffects(dt, now); tableEffects(dt, now); stepParticles(fxSmall, dt, now); stepParticles(fxBig, dt, now); }
+    if (!G.paused) { cueEffects(dt, now); tableEffects(dt, now); stepParticles(fxSmall, dt, now); stepParticles(fxBig, dt, now); stepParticles(fxSolid, dt, now); }
     const far = view === 'top' && G.phase !== 'menu' ? 3.6 : 1;
-    fxSmall.mat.size = fxSmall.size * far; fxBig.mat.size = fxBig.size * far;
+    fxSmall.mat.size = fxSmall.size * far; fxBig.mat.size = fxBig.size * far; fxSolid.mat.size = fxSolid.size * far;
     // Power UI
     powerEl.style.setProperty('--p', power.toFixed(3));
     const pct = Math.round(power * 100); $('pv').textContent = pct; powerEl.setAttribute('aria-valuenow', pct);
