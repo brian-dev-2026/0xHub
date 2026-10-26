@@ -275,6 +275,9 @@ svg { display: block; }
 .unl .u .pic { width: 30px; height: 30px; border-radius: 9px; }
 .status { display: flex; align-items: center; gap: 10px; justify-content: center; font-size: 14px; color: var(--muted); min-height: 22px; }
 .status.bad { color: #ffb4a8; }
+.verify { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.vbar { width: min(260px, 80%); height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+.vbar i { display: block; height: 100%; width: calc(var(--f, 0) * 100%); min-width: 6px; border-radius: 3px; background: linear-gradient(90deg, #d3a352, #f6dc97); box-shadow: 0 0 8px rgba(246,220,151,.5); transition: width .5s; }
 
 /* ---------- Short screens (phone landscape, and upright phones turned sideways): side columns ---------- */
 .root.short .topl { top: calc(6px + var(--sa-top)); left: auto; right: max(8px, var(--sa-right)); flex-direction: column; width: 84px; gap: 5px; margin-top: 44px; }

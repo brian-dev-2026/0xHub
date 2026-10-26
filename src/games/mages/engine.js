@@ -212,6 +212,25 @@ export function mountMages(host, { onExit, api }) {
     });
   }
 
+  /**
+   * After the player leaves a result the server is still verifying (it finishes on its own), fetch progress again a few
+   * times so a stage win shows up on the world map without a reload. Unlocks only ever come from the server.
+   */
+  function refreshProgressSoon() {
+    for (const ms of [6000, 20000, 45000, 90000]) later(() => {
+      api.progress().then(r => {
+        if (!alive || !r || !r.progress) return;
+        progress = r.progress; unl = r.unlocked || unlockedOf(progress);
+        if (screenName === 'world') showWorld();
+      }).catch(() => { /* the next mount loads it anyway */ });
+    }, ms);
+  }
+
+  /** Runs the player left before the server had them (runId → mode), for the message once they are stored. */
+  const leftModes = new Map();
+  const savedSoonText = mode => mode === 'endless' ? 'Your score will appear on the leaderboard in a minute'
+    : mode === 'stage' ? 'Your stars will be saved in a minute' : 'Your last result will be saved in a minute';
+
   function worldNote() {
     if (!leftover || !leftover.unsent) return null;
     // After a few failed attempts the player may give up on it (R44), so it can never block Play for good
@@ -310,6 +329,20 @@ export function mountMages(host, { onExit, api }) {
         screenName = 'results';
         ui.results(run.results);
       },
+      onStored() {
+        // The final chunk is on the server: nothing can be lost now, verification just takes a moment
+        if (mine()) return;
+        if (leftover && leftover.runId === runId) { leftover = null; leftoverFailed = false; }
+        ui.toast(savedSoonText(leftModes.get(runId)));
+        refreshProgressSoon();
+        offWorld();
+      },
+      onProgress(verifiedTo, queuedTo) {
+        if (!mine() || !run.results) return;
+        // A cold server instance resumes from its last checkpoint, so verifiedTo can step back: the bar never does
+        run.results.verify = Math.max(run.results.verify || 0, queuedTo > 0 ? Math.min(1, verifiedTo / queuedTo) : 0);
+        if (screenName === 'results') ui.verifyProgress(run.results.verify);
+      },
       onStatus(state, final) {
         if (!mine()) { leftoverFailed = state === 'failed'; offWorld(); return; }
         run.offline = state === 'failed';
@@ -332,8 +365,17 @@ export function mountMages(host, { onExit, api }) {
     const r = run;
     if (!r) { showWorld(); return; }
     if (act === 'resend') { r.results.state = 'verify'; ui.results(r.results); r.submit.retry(); return; }
-    // Leaving with the result unsaved: its submitter carries on from the world map
-    if (r.submit.unsent) { leftover = r.submit; leftoverFailed = r.results.state === 'failed'; }
+    if (r.submit.finalStored && !r.submit.done) {
+      // Leaving while the server still verifies: it finishes and records the run on its own (R43)
+      r.submit.detach();
+      ui.toast(savedSoonText(r.cfg.mode));
+      refreshProgressSoon();
+    } else if (r.submit.unsent) {
+      // Leaving with the result unsaved: its submitter carries on from the world map
+      leftover = r.submit; leftoverFailed = r.results.state === 'failed';
+      leftModes.set(r.runId, r.cfg.mode);
+      leftover.detach();
+    }
     run = null;
     backdrop(r.cfg);
     showWorld();
@@ -559,6 +601,7 @@ export function mountMages(host, { onExit, api }) {
   const pending = takePendingRun();
   if (pending) {
     leftover = createRunSubmitter(api, pending.runId, submitHandlers(pending.runId), pending.batches);
+    leftover.detach(); // once the server has it, the server finishes it; the world map only refreshes progress
     leftover.retry();
     showWorld();
   }

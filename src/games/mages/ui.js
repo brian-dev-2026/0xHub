@@ -397,7 +397,7 @@ export function createUI(rootEl, on) {
 
   // ---------- Results ----------
   /**
-   * opts: { mode, stage, won, outcome (local until verified), state: 'verify' | 'done' | 'failed' | 'rejected',
+   * opts: { mode, stage, won, outcome (local until verified), state: 'verify' | 'done' | 'failed' | 'rejected', verify? (0..1),
    * error?, stars?, newUnlocks?: { mages, traps, spells, endless }, score?, best?, rank? }
    */
   function results(o) {
@@ -420,7 +420,8 @@ export function createUI(rootEl, on) {
         ${nu.spells.map(k => `<span class="u">${iconPic(k, KIT_COLOR[k])}${SPELL_TEXT[k].name}</span>`).join('')}
         ${nu.endless ? `<span class="u"><span class="pic" style="--el:#c9a6ff">${ICON.infinity}</span>Endless mode</span>` : ''}
       </div></div>` : '';
-    const status = o.state === 'verify' ? '<div class="status"><span class="spin"></span>Verifying your run…</div>'
+    const status = o.state === 'verify'
+      ? `<div class="verify"><div class="status"><span class="spin"></span>Verifying your score…</div><div class="vbar"><i id="vfill" style="--f:${(o.verify || 0).toFixed(3)}"></i></div></div>`
       : o.state === 'failed' ? `<div class="status bad">Couldn't save your result.</div>`
         : rejected ? `<div class="status bad">${esc(friendlyError(o.error))}</div>` : '';
     const canNext = done && !endless && o.won && o.stage < 5;
@@ -448,6 +449,12 @@ export function createUI(rootEl, on) {
     return { top: top.offsetTop + top.offsetHeight + 6, bottom: frameH - Math.min(shop.offsetTop, go.offsetTop) + 4, left: 8, right: 8 };
   }
 
+  /** Moves the verification bar (0..1) without rebuilding the results card (a rebuild could swallow a click). */
+  function verifyProgress(f) {
+    const bar = sheet.querySelector('#vfill');
+    if (bar) bar.style.setProperty('--f', Math.max(0, Math.min(1, f)).toFixed(3));
+  }
+
   /** A ring that fills under a held finger until the press becomes a long press (details); null hides it. */
   function holdRing(x, y, color) {
     const h = $('hold');
@@ -457,7 +464,7 @@ export function createUI(rootEl, on) {
   }
 
   return {
-    world, team, holdRing, showHud, hideHud, frame, banner, mageInfo, pause, results, toast, insets,
+    world, team, holdRing, verifyProgress, showHud, hideHud, frame, banner, mageInfo, pause, results, toast, insets,
     get infoOpen() { return !info.hidden; },
     /** Mage portraits (kind → image URL) for the shop, team cards and details; swapped in place, so no screen is rebuilt under a click. */
     setPortraits(map) {

@@ -46,6 +46,7 @@ export interface UI {
   results(opts: object): void;
   toast(text: string, bad?: boolean): void;
   holdRing(x: number | null, y?: number, color?: string | null): void;
+  verifyProgress(fraction: number): void;
   insets(): { top: number; right: number; bottom: number; left: number };
   readonly infoOpen: boolean;
   setPortraits(map: Partial<Record<MageId, string>>): void;
