@@ -27,14 +27,17 @@ export function clearPendingRun() {
 
 /** A chunk goes out at every wave end, or after this much sim time without one (the server caps a chunk at 150 s, R31). */
 export const CHUNK_TICKS = secs(120);
+/** A request with no answer after this long counts as failed (R44), so the player gets Retry instead of a spinner. */
+export const REQUEST_TIMEOUT_MS = 15000;
 
 /**
  * createRunSubmitter(api, runId, handlers, batches = []) → { runId, afterTick(sim, log, events), finish(sim, log),
- * retry(), unsent, finalUnsent, drop(), stop() }
+ * retry(), unsent, finalUnsent, failures, drop(), stop() }
  * `batches` are chunks left unsent by an earlier visit (they go first). handlers: onResult(res) for the final response,
  * onReject(error) when the server refuses the run (ok: false), onStatus(state, final) with 'ok' | 'failed'. 'failed'
- * means a request did not get through; `final` says the final chunk is among the unsent ones: that one waits for
- * retry() (the player's Retry), while earlier chunks are retried on their own after a growing pause.
+ * means a request did not get through (no answer, an error, or REQUEST_TIMEOUT_MS without a reply); `final` says the
+ * final chunk is among the unsent ones: that one waits for retry() (the player's Retry), while earlier chunks are
+ * retried on their own after a growing pause. `api.input(runId, batch, { signal })` may honour the abort signal.
  */
 export function createRunSubmitter(api, runId, { onResult, onReject, onStatus }, batches = []) {
   const queue = batches.slice();
@@ -44,15 +47,24 @@ export function createRunSubmitter(api, runId, { onResult, onReject, onStatus },
   const save = () => (queue.length ? savePendingRun({ runId, batches: queue }) : clearPendingRun());
   const hasFinal = () => queue.some(b => b.final === true);
 
+  /** One request: the parsed response, or null when it failed or timed out (the request is then aborted). */
+  async function send(batch) {
+    const ctl = new AbortController();
+    let expire = 0;
+    const timeout = new Promise(resolve => { expire = setTimeout(() => { ctl.abort(); resolve(null); }, REQUEST_TIMEOUT_MS); });
+    try {
+      return await Promise.race([api.input(runId, batch, { signal: ctl.signal }).catch(() => null), timeout]);
+    } finally { clearTimeout(expire); }
+  }
+
   async function pump() {
     if (busy || stopped) return;
     clearTimeout(timer); timer = 0;
     busy = true;
     while (queue.length && !stopped) {
-      let res;
-      try { res = await api.input(runId, queue[0]); } catch (e) { res = null; }
+      const res = await send(queue[0]);
       if (stopped) break;
-      if (res === null) {
+      if (!res) {
         failures++;
         busy = false;
         const fin = hasFinal();
@@ -84,15 +96,25 @@ export function createRunSubmitter(api, runId, { onResult, onReject, onStatus },
     afterTick(sim, log, evs) {
       if (evs.some(e => e.type === 'waveEnd') || sim.tick - lastUpTo >= CHUNK_TICKS) post(sim, log, false);
     },
-    /** The run is over (won, lost, or Endless ended by the player): posts the final chunk. */
+    /** The run is over with something to record (a won stage, Endless): posts the final chunk. */
     finish(sim, log) { post(sim, log, true); },
     retry() { pump(); },
     /** True while some chunk has not been acknowledged. */
     get unsent() { return queue.length > 0 && !stopped; },
     get finalUnsent() { return !stopped && hasFinal(); },
-    /** Stops sending and forgets the run (quitting a stage: nothing to record). */
+    /** Failed attempts in a row. */
+    get failures() { return failures; },
+    /** Stops sending and forgets the run (a quit or lost stage: nothing to record). */
     drop() { stopped = true; clearTimeout(timer); clearPendingRun(); },
     /** Stops sending but keeps what is stored (the page is going away). */
     stop() { stopped = true; clearTimeout(timer); },
   };
+}
+
+/** The stored pending run if it can still record something (it holds a final chunk, R44); any other is forgotten. */
+export function takePendingRun() {
+  const run = loadPendingRun();
+  if (run && run.batches.length && run.batches.some(b => b && b.final === true)) return run;
+  if (run) clearPendingRun();
+  return null;
 }

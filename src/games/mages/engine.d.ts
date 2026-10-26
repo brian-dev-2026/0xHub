@@ -4,8 +4,8 @@ export interface MagesApi {
   progress(): Promise<unknown>;
   /** POST /api/mages/start */
   start(body: unknown): Promise<unknown>;
-  /** POST /api/mages/runs/:id/input (one wave's chunk) */
-  input(runId: string, batch: unknown): Promise<unknown>;
+  /** POST /api/mages/runs/:id/input (one chunk); `signal` aborts a request the client gave up on. */
+  input(runId: string, batch: unknown, opts?: { signal?: AbortSignal }): Promise<unknown>;
 }
 
 /** Mounts Mage Siege into `host` (inside a shadow root) and returns a cleanup function. */

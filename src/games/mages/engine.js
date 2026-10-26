@@ -12,8 +12,9 @@ import { createFx } from './fx';
 import { createInput } from './input';
 import { createScene, loadQuality, QUALITY, saveQuality } from './scene';
 import { buildTerrain } from './terrain';
-import { clearPendingRun, createRunSubmitter, loadPendingRun } from './submit';
-import { MAGE_COLOR, UI_CSS, createUI } from './ui';
+import { createRunSubmitter, takePendingRun } from './submit';
+import { MAGE_COLOR, createUI, friendlyError } from './ui';
+import { UI_CSS } from './ui-style';
 import { createUnits } from './units';
 
 const FONT_HREF = 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap';
@@ -167,6 +168,7 @@ export function mountMages(host, { onExit, api }) {
     const s = createSim(cfg || MENU_CFG);
     game.setSim(s);
     if (!map || map.seed !== s.map.seed) showMap(s.map);
+    view.resetZoom();
   }
 
   const ui = createUI(rootEl, {
@@ -188,6 +190,7 @@ export function mountMages(host, { onExit, api }) {
     cancelMode: () => setMode(null),
     result: act => resultAction(act),
     resendLeftover: () => { if (leftover) { leftoverFailed = false; leftover.retry(); if (screenName === 'world') showWorld(); } },
+    discardLeftover: () => { if (leftover) { leftover.drop(); leftover = null; ui.toast('Your last result was discarded'); if (screenName === 'world') showWorld(); } },
   });
 
   function relayout() {
@@ -211,7 +214,8 @@ export function mountMages(host, { onExit, api }) {
 
   function worldNote() {
     if (!leftover || !leftover.unsent) return null;
-    return leftoverFailed ? { text: "Your last result isn't saved yet.", bad: true, retry: true } : { text: 'Saving your last result…', busy: true };
+    // After a few failed attempts the player may give up on it (R44), so it can never block Play for good
+    return leftoverFailed ? { text: "Your last result isn't saved yet.", bad: true, retry: true, discard: leftover.failures >= 3 } : { text: 'Saving your last result…', busy: true };
   }
   function showWorld() {
     screenName = 'world';
@@ -265,7 +269,11 @@ export function mountMages(host, { onExit, api }) {
       run.over = true;
       setMode(null); closeInfo(); input.cancel();
       run.results = { mode: run.cfg.mode, stage: run.cfg.stage, won: end.won, outcome: outcomeOf(sim), state: 'verify' };
-      run.submit.finish(sim, log);
+      if (run.cfg.mode === 'stage' && !end.won) {
+        // A lost stage records nothing (R33), so there is nothing to wait for or to keep (R44)
+        run.submit.drop();
+        Object.assign(run.results, { state: 'done', stars: 0 });
+      } else run.submit.finish(sim, log);
       // Let the last moment play out before the results cover the board
       const r = run;
       later(() => { if (run === r && screenName === 'play') { screenName = 'results'; ui.results(r.results); } }, END_PAUSE_MS);
@@ -289,7 +297,12 @@ export function mountMages(host, { onExit, api }) {
         if (screenName === 'results') ui.results(run.results);
       },
       onReject(error) {
-        if (!mine()) { if (leftover && leftover.runId === runId) leftover = null; offWorld(); return; }
+        if (!mine()) {
+          if (leftover && leftover.runId === runId) leftover = null;
+          ui.toast(friendlyError(error).replace('This run', 'Your last run'), true);
+          offWorld();
+          return;
+        }
         // The server refused the run: it can't count, so stop it and say so
         run.over = true; running = false;
         setMode(null); closeInfo(); input.cancel(); ui.pause(null); game.resume();
@@ -475,7 +488,12 @@ export function mountMages(host, { onExit, api }) {
     else if (why) ui.toast(why, true);
     units.dropMage(!!act);
   }
-  const input = createInput(view, { tap: onTap, dragStart: onDragStart, dragMove: onDragMove, dragEnd: onDragEnd });
+  /** Long-press feedback: a ring fills under a finger held on a mage (the press becomes "show details"). */
+  function onPress(tile, x, y) {
+    const mg = tile >= 0 && playing() && !mode ? mageAt(tile) : null;
+    ui.holdRing(mg ? x : null, y, mg ? MAGE_COLOR[mg.kind] : null);
+  }
+  const input = createInput(view, { tap: onTap, dragStart: onDragStart, dragMove: onDragMove, dragEnd: onDragEnd, press: onPress });
 
   /** An action the sim refused after all (the board changed before its tick): undo its preview. */
   function onRefused(a) {
@@ -537,13 +555,13 @@ export function mountMages(host, { onExit, api }) {
   backdrop(null);
   showWorld();
   loadProgress();
-  // A run's chunks left unsent last time go out first (Review Focus 3)
-  const pending = loadPendingRun();
-  if (pending && pending.batches.length) {
+  // A result left unsent last time goes out first (Review Focus 3); a run without a final chunk can't record anything (R44)
+  const pending = takePendingRun();
+  if (pending) {
     leftover = createRunSubmitter(api, pending.runId, submitHandlers(pending.runId), pending.batches);
     leftover.retry();
     showWorld();
-  } else if (pending) clearPendingRun();
+  }
   later(makePortraits, 60);
 
   listen(window, 'resize', relayout);

@@ -4,12 +4,14 @@
 // tileAt(), so it works the same when an upright phone turns the game sideways.
 
 const DRAG_PX = 9;      // movement that turns a press into a drag
-const LONG_MS = 450;    // a press held this long without moving is a long tap
+export const LONG_MS = 450; // a press held this long without moving is a long tap
 
 /**
  * createInput(view, handlers) → { cancel(), dispose() }
  * handlers: tap(tile, { long }), dragStart(tile) → true when it starts carrying something (otherwise the drag pans),
- * dragMove(tile), dragEnd(fromTile, toTile). Tiles are board indices, or -1 off the board.
+ * dragMove(tile), dragEnd(fromTile, toTile), and optionally press(tile, x, y) when a finger goes down (game-frame
+ * px, for long-press feedback) and press(-1) once that press can no longer become a tap. Tiles are board indices, or -1
+ * off the board.
  */
 export function createInput(view, handlers) {
   const el = view.renderer.domElement;
@@ -18,12 +20,14 @@ export function createInput(view, handlers) {
   let pinch = null;      // { d, cx, cy }
 
   const at = e => view.loc(e);
+  const unpress = () => handlers.press && handlers.press(-1);
   const centre = () => { let x = 0, y = 0; for (const p of pts.values()) { x += p.x; y += p.y; } return { x: x / pts.size, y: y / pts.size }; };
   const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
 
   /** Ends a carry without a drop (a second finger, a cancelled pointer). */
   function abort() {
     if (press && press.mode === 'carry') handlers.dragEnd(press.tile, -1);
+    if (press && press.mode === 'press') unpress();
     press = null;
   }
 
@@ -34,6 +38,7 @@ export function createInput(view, handlers) {
     pts.set(e.pointerId, p);
     if (pts.size === 1) {
       press = { id: e.pointerId, x0: p.x, y0: p.y, t0: performance.now(), tile: view.tileAt(e.clientX, e.clientY), mode: 'press', x: p.x, y: p.y };
+      if (handlers.press) handlers.press(press.tile, p.x, p.y);
     } else if (pts.size === 2) {
       abort();
       const c = centre();
@@ -54,6 +59,7 @@ export function createInput(view, handlers) {
     }
     if (!press || press.id !== e.pointerId) return;
     if (press.mode === 'press' && Math.hypot(p.x - press.x0, p.y - press.y0) > DRAG_PX) {
+      unpress();
       press.mode = press.tile >= 0 && handlers.dragStart(press.tile) ? 'carry' : 'pan';
     }
     if (press.mode === 'carry') handlers.dragMove(view.tileAt(e.clientX, e.clientY));
@@ -76,6 +82,7 @@ export function createInput(view, handlers) {
     if (!press || press.id !== e.pointerId) return;
     const g = press;
     press = null;
+    if (g.mode === 'press') unpress();
     if (e.type === 'pointercancel') { if (g.mode === 'carry') handlers.dragEnd(g.tile, -1); return; }
     if (g.mode === 'carry') handlers.dragEnd(g.tile, view.tileAt(e.clientX, e.clientY));
     else if (g.mode === 'press') handlers.tap(g.tile, { long: performance.now() - g.t0 >= LONG_MS });
