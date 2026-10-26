@@ -35,9 +35,15 @@ export interface Finish {
 export interface MageChunkResult {
   ok: boolean;
   error?: string;
+  /** With ok: false, the upload was refused only for now (verification is behind): send it again later. */
+  retry?: boolean;
   /** True while uploaded chunks (or the recording of the result) are still waiting for the server. */
   pending?: boolean;
-  /** Tick the server's verification has reached, and the end of the last uploaded chunk. */
+  /**
+   * Tick the server's verification has reached (it can go back after the server
+   * lost its in-memory progress: verification restarts from the last checkpoint),
+   * and the end of the last uploaded chunk.
+   */
   verifiedTo?: number;
   queuedTo?: number;
   finished?: boolean;
@@ -54,6 +60,8 @@ export interface QueuedChunk {
   actions: Action[];
   h: number;
   final: boolean;
+  /** Length of the chunk's JSON (bounds the queue, and the cost of storing it). */
+  size: number;
 }
 
 /** A run as stored (its sim checkpoint and map are stored beside it). */
@@ -72,7 +80,11 @@ export interface RunData {
   queue: QueuedChunk[];
   /** Tick of the stored sim checkpoint: the end of the last verified chunk. */
   simTo: number;
-  /** Cold slices begun since the last one that ended (one that never ended died, e.g. out of CPU). */
+  /**
+   * Cold slices begun since the last checkpoint. Slices that die (out of CPU) take
+   * the instance with them, so the next one is cold and counted; every budget is
+   * halved per count until a chunk end is verified, and too many counts kill the run.
+   */
   attempts: number;
   /** When the run is discarded, unless chunks are still waiting for verification. */
   abandonAt: number;
@@ -114,6 +126,10 @@ export const CLOCK_TOLERANCE_MS = 3000;
 export const MAX_GAME_SPEED = 2;
 /** Most actions one chunk may carry (bounds the cost of an upload and of a slice). */
 export const MAX_CHUNK_ACTIONS = 2000;
+/** Most JSON the waiting chunks may take in the run row; past it, uploads are refused for now (retry). */
+export const MAX_QUEUE_BYTES = 256_000;
+/** Storing the run at a checkpoint costs one work unit per this many bytes of queued chunks (JSON). */
+export const QUEUE_BYTES_PER_WORK = 64;
 /** An idle run (no upload for this long, nothing waiting) is discarded; a finished one keeps its result this long. */
 export const ABANDON_AFTER_MS = 60 * 60 * 1000;
 /** Each upload arms the alarm this far ahead, so verification goes on if the page goes away. */
@@ -145,9 +161,10 @@ export const WARMUP_RATIO = 8;
 /** A slice that has to restore the sim from storage first gets this fraction. */
 const RESTORE_DIVISOR = 4;
 /**
- * After this many cold slices in a row that died, the run is given up. Below
- * Cloudflare's 6 retries of a failed alarm, so the run is given up (and later
- * discarded) even if only those retries are left to drive it.
+ * After this many cold slices without a checkpoint (each one counted because the
+ * instance was lost, typically by a slice dying out of CPU), the run is given up.
+ * Below Cloudflare's 6 retries of a failed alarm, so the run is given up (and
+ * later discarded) even if only those retries are left to drive it.
  */
 export const MAX_SLICE_DEATHS = 5;
 
@@ -160,6 +177,9 @@ export function newRun(runId: string, userId: string, cfg: SimConfig, now: numbe
   };
   return { data, sim };
 }
+
+/** JSON length of the waiting chunks. */
+export const queueBytes = (queue: readonly QueuedChunk[]): number => queue.reduce((n, c) => n + c.size, 0);
 
 /** Chunks wait and the run is alive. */
 export const isRunnable = (data: RunData): boolean => !data.invalid && !data.done && data.queue.length > 0;
@@ -211,9 +231,13 @@ export function decideUpload(data: RunData | null, userId: string, batch: Record
   const actions = validateActions(batch.actions, data.queuedTo, upTo, max);
   if (typeof actions === "string") return kill(actions === "too many actions" ? "Too many actions" : `Malformed input: ${actions}`);
 
+  const size = JSON.stringify({ upTo, actions, h, final }).length;
+  // Verification is far behind: refuse for now, so the run row stays small (the client sends it again later).
+  if (data.queue.length > 0 && queueBytes(data.queue) + size > MAX_QUEUE_BYTES)
+    return { kind: "reply", res: { ok: false, error: "Verification is behind: send this again later", retry: true } };
   const next: RunData = {
     ...data, actions: data.actions + actions.length, queuedTo: upTo, queuedHash: h, queuedFinal: final,
-    queue: [...data.queue, { upTo, actions, h, final }], abandonAt: now + ABANDON_AFTER_MS,
+    queue: [...data.queue, { upTo, actions, h, final, size }], abandonAt: now + ABANDON_AFTER_MS,
   };
   return { kind: "queue", data: next };
 }
@@ -255,14 +279,15 @@ export type SlicePlan = { kind: "warm"; budget: number } | { kind: "cold"; count
 /**
  * How to run a slice now: null when nothing waits; warm (the sim is in memory: no
  * write at all); cold (the sim must be restored: store `counted`, the run with this
- * attempt counted, durably first, so if this slice dies the next one knows and
- * halves its budget); or kill, when MAX_SLICE_DEATHS cold slices died in a row.
- * A warm slice that dies takes the instance with it, so the next slice is cold
- * and counted.
+ * cold slice counted, durably first); or kill, after MAX_SLICE_DEATHS cold slices
+ * without a checkpoint. A warm slice that dies takes the instance with it, so the
+ * next slice is cold and counted. The count is cleared only by a checkpoint, and
+ * every budget (warm too) is halved per count, so a run whose slices keep dying
+ * either verifies a chunk end with smaller slices or is killed: it can't loop.
  */
 export function planSlice(data: RunData, simCached: boolean, isolateWork: number, now: number): SlicePlan | null {
   if (!isRunnable(data)) return null;
-  if (simCached) return { kind: "warm", budget: sliceBudget(true, 0, isolateWork) };
+  if (simCached) return { kind: "warm", budget: sliceBudget(true, data.attempts, isolateWork) };
   if (data.attempts >= MAX_SLICE_DEATHS) return { kind: "kill", data: killed(data, "Run could not be verified", now) };
   return { kind: "cold", counted: { ...data, attempts: data.attempts + 1 }, budget: sliceBudget(false, data.attempts, isolateWork) };
 }
@@ -289,7 +314,9 @@ export function runSlice(data: RunData, sim: Sim, budget: number, now: number): 
     if (hashSim(sim) !== c.h) return kill("Run failed verification");
     i++;
     if (sim.phase === "won" || sim.phase === "lost" || c.final) return { kind: "finish", data: finished(data, sim, now), work: spent() };
-    checkpoint = { data: { ...data, queue: data.queue.slice(i), simTo: sim.tick, attempts: 0 }, sim: simToJson(sim) };
+    const queue = data.queue.slice(i);
+    left -= Math.ceil(queueBytes(queue) / QUEUE_BYTES_PER_WORK); // storing the run row with its queue
+    checkpoint = { data: { ...data, queue, simTo: sim.tick, attempts: 0 }, sim: simToJson(sim) };
     if (left <= 0) break;
   }
   return { kind: "progress", checkpoint, work: spent() };
@@ -346,7 +373,7 @@ export interface RunStore {
   /** Writes a done run's result to D1 (safe to repeat) and returns the final response. */
   record(data: RunData): Promise<MageChunkResult>;
   /** Tests only: told just before a slice runs. */
-  trace?(event: "slice"): void;
+  trace?(event: "slice", info: { cold: boolean; budget: number }): void;
 }
 
 /**
@@ -463,15 +490,16 @@ export class MageRunCore {
     const cold = this.sim === null;
     const sim = this.sim ?? this.store.loadSim();
     this.sim = null; // dropped while it is stepped; kept again once the slice has ended well
-    this.store.trace?.("slice");
+    this.store.trace?.("slice", { cold, budget: plan.budget });
     const out = runSlice(data, sim, plan.budget, now);
     this.warmth.work += out.work;
     if (kind !== "alarm") this.lastDrivenAt = now;
     if (out.kind !== "progress") return this.over(out.data);
+    // The count of cold slices (attempts) is cleared by the checkpoint only, never by a slice merely surviving.
     if (out.checkpoint) {
       this.store.saveCheckpoint(out.checkpoint.sim, out.checkpoint.data);
       this.data = out.checkpoint.data;
-    } else if (cold) this.save({ ...data, attempts: 0 }); // the cold slice survived
+    }
     this.sim = sim;
   }
 

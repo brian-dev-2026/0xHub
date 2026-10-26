@@ -19,8 +19,10 @@ export class FakeStore implements RunStore {
   log: string[] = [];
   recorded: RunData[] = [];
   failRecord = false;
-  /** Emulates a slice running out of CPU: the invocation dies just as the slice starts. */
+  /** Emulates a slice running out of CPU: the invocation dies just as the slice starts (always, or when `dieWhen` says so). */
   dieOnSlice = false;
+  dieWhen: ((slice: { cold: boolean; budget: number }) => boolean) | null = null;
+  deaths = 0;
   constructor(private clock: () => number) {}
 
   loadRun(): RunData | null {
@@ -74,9 +76,12 @@ export class FakeStore implements RunStore {
     this.log.push("record");
     return { ok: true, finished: true, outcome: data.finish!.outcome };
   }
-  trace() {
+  trace(_event: "slice", info: { cold: boolean; budget: number }) {
     this.log.push("slice");
-    if (this.dieOnSlice) throw new Error("exceeded CPU");
+    if (this.dieOnSlice || this.dieWhen?.(info)) {
+      this.deaths++;
+      throw new Error("exceeded CPU");
+    }
   }
 }
 

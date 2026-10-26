@@ -10,6 +10,7 @@ import {
   CHUNK_WORK,
   DRIVEN_RECENTLY_MS,
   MAX_CHUNK_ACTIONS,
+  MAX_QUEUE_BYTES,
   MAX_SLICE_DEATHS,
   MIN_SLICE_WORK,
   RECORD_RETRY_MS,
@@ -65,7 +66,7 @@ describe("mage siege uploads (cheap checks, queued against the last uploaded chu
   it("queues a chunk without simulating it, and pushes the abandon deadline back", () => {
     const d = queued(start, c0);
     expect(d).toMatchObject({ simTo: 0, queuedTo: c0.upTo, queuedHash: c0.h, queuedFinal: false, actions: c0.actions.length, abandonAt: LATE + ABANDON_AFTER_MS });
-    expect(d.queue).toEqual([{ upTo: c0.upTo, actions: c0.actions, h: c0.h, final: false }]);
+    expect(d.queue).toEqual([{ upTo: c0.upTo, actions: c0.actions, h: c0.h, final: false, size: JSON.stringify({ upTo: c0.upTo, actions: c0.actions, h: c0.h, final: false }).length }]);
     // The decision never changes the stored run it was given.
     expect(start.queue).toEqual([]);
     expect(statusOf(d)).toEqual({ ok: true, pending: true, verifiedTo: 0, queuedTo: c0.upTo });
@@ -94,6 +95,14 @@ describe("mage siege uploads (cheap checks, queued against the last uploaded chu
     expect(kill({ ...c0, h: c0.h ^ 1 }, d)).toBe("Run failed verification");
     expect(kill({ ...c0, h: c0.h ^ 1, final: true }, d)).toBe("Run failed verification");
     expect(expectKind(decideUpload(d, USER, { ...c0, h: c0.h ^ 1 }, LATE), "kill").data).toMatchObject({ invalid: true, queue: [], error: "Run failed verification" });
+  });
+
+  it("refuses an upload for now (retry) while the waiting chunks hold over MAX_QUEUE_BYTES of JSON", () => {
+    const d = queued(start, c0);
+    const full = { ...d, queue: [{ ...d.queue[0], size: MAX_QUEUE_BYTES }] };
+    const c1 = chunk(cfg, win.actions, win.waveEnds[0], win.waveEnds[1]);
+    expect(decideUpload(full, USER, c1, LATE)).toEqual({ kind: "reply", res: { ok: false, error: "Verification is behind: send this again later", retry: true } });
+    expectKind(decideUpload(d, USER, c1, LATE), "queue");
   });
 
   it("kills a run ahead of 2x real time", () => {
@@ -167,11 +176,11 @@ describe("mage siege slices", () => {
     // Zero-length chunks cost CHUNK_WORK each, so a budget stops at a few of them.
     let d = newRun("r1", USER, cfg, T0).data;
     const start = d.queuedHash;
-    for (let k = 0; k < 10; k++) d = { ...d, queue: [...d.queue, { upTo: 0, actions: [], h: start, final: false }] };
+    for (let k = 0; k < 10; k++) d = { ...d, queue: [...d.queue, { upTo: 0, actions: [], h: start, final: false, size: 0 }] };
     const out = expectKind(runSlice(d, createSim(cfg), 3 * CHUNK_WORK, LATE), "progress");
     expect(out.checkpoint!.data.queue).toHaveLength(7);
     // An action costs one unit on top of its tick.
-    const one = { ...newRun("r1", USER, cfg, T0).data, queue: [{ upTo: 1, actions: [{ t: 0, type: "startWave" as const }], h: 0, final: false }] };
+    const one = { ...newRun("r1", USER, cfg, T0).data, queue: [{ upTo: 1, actions: [{ t: 0, type: "startWave" as const }], h: 0, final: false, size: 0 }] };
     const sim = createSim(cfg);
     const work = 1 + sim.enemies.length + sim.mages.length + sim.zones.length + 1;
     expect(runSlice(one, sim, 1, LATE)).toMatchObject({ kind: "kill", work: work + CHUNK_WORK });
@@ -181,8 +190,8 @@ describe("mage siege slices", () => {
     const c0 = chunk(cfg, win.actions, 0, win.waveEnds[0]);
     const base = newRun("r1", USER, cfg, T0).data;
     const run = (q: RunData["queue"]) => runSlice({ ...base, queue: q }, createSim(cfg), 1e9, LATE);
-    expect(expectKind(run([{ ...c0, h: c0.h ^ 1, final: false }]), "kill").data).toMatchObject({ invalid: true, queue: [], error: "Run failed verification" });
-    expectKind(run([{ ...c0, actions: c0.actions.slice(1), final: false }]), "kill");
+    expect(expectKind(run([{ ...c0, h: c0.h ^ 1, final: false, size: 0 }]), "kill").data).toMatchObject({ invalid: true, queue: [], error: "Run failed verification" });
+    expectKind(run([{ ...c0, actions: c0.actions.slice(1), final: false, size: 0 }]), "kill");
     const d = all();
     const tail = d.queue[9];
     expect(expectKind(runSlice({ ...d, queue: [...d.queue.slice(0, 9), { ...tail, upTo: last + 30, final: false }] }, createSim(cfg), 1e9, LATE), "kill").data.error).toBe(
@@ -276,7 +285,7 @@ describe("mage siege budgets and plans", () => {
   });
 
   it("planSlice: warm slices count nothing; cold slices count their attempt first and halve per death; too many deaths kill", () => {
-    const d = { ...newRun("r1", USER, cfg, T0).data, queue: [{ upTo: 30, actions: [], h: 0, final: false }] };
+    const d = { ...newRun("r1", USER, cfg, T0).data, queue: [{ upTo: 30, actions: [], h: 0, final: false, size: 0 }] };
     expect(planSlice({ ...d, queue: [] }, true, 1e9, LATE)).toBeNull();
     expect(planSlice({ ...d, invalid: true }, true, 1e9, LATE)).toBeNull();
     expect(planSlice(d, true, 1e9, LATE)).toEqual({ kind: "warm", budget: SLICE_WORK });
@@ -293,7 +302,7 @@ describe("mage siege budgets and plans", () => {
 
   it("alarmJob and nextAlarm: a backlog keeps the run past its deadline; idle and dead runs are discarded; results are kept", () => {
     const base = newRun("r1", USER, cfg, T0).data;
-    const behind = { ...base, queue: [{ upTo: 30, actions: [], h: 0, final: false }] };
+    const behind = { ...base, queue: [{ upTo: 30, actions: [], h: 0, final: false, size: 0 }] };
     expect(alarmJob(base, T0 + 10)).toBe("wait");
     expect(nextAlarm(base, T0 + 10)).toBe(base.abandonAt);
     expect(alarmJob(base, base.abandonAt)).toBe("discard");
@@ -372,17 +381,23 @@ describe("mage siege run orchestration (MageRunCore on a counting store)", () =>
     h.reset(); // evicted
     h.store.log.length = 0;
     await h.poll();
-    expect(h.store.log).toEqual(["run a1", "sync", "restore", "slice", "run a0"]);
+    // The count stays until a checkpoint clears it (a slice merely surviving doesn't).
+    expect(h.store.log).toEqual(["run a1", "sync", "restore", "slice"]);
+    expect(h.data.attempts).toBe(1);
+    for (let k = 0; k < 100 && h.data.attempts > 0; k++) await h.poll();
+    expect(h.store.log).toContain("checkpoint");
+    expect(h.data.attempts).toBe(0);
   });
 
   it("after eviction, verification restarts from the last checkpoint and still verifies the game", async () => {
     const h = await started(cfg, 2000 * WARMUP_RATIO);
     for (const [k, upTo] of win.waveEnds.entries()) await h.send(chunk(cfg, win.actions, h.data.queuedTo, upTo, k === 9 ? { final: true } : {}));
-    for (let k = 0; !h.data.done; k++) {
-      if (k % 3 === 2) h.reset();
+    for (let k = 0; !h.data.done && !h.data.invalid && k < 10_000; k++) {
+      if (k % 10 === 9) h.reset();
       h.now += 2000;
       await h.poll();
     }
+    expect(h.data.invalid).toBe(false);
     expect(h.data.finish!.outcome).toEqual(replay(cfg, win.actions, last).outcome);
     expect(h.store.recorded).toHaveLength(1);
   });
@@ -406,6 +421,55 @@ describe("mage siege run orchestration (MageRunCore on a counting store)", () =>
     // The dead run is discarded at its deadline.
     while (await h.fireAlarm());
     expect(h.store.run).toBeNull();
+  });
+
+  /** Drives a run by alarms only (page closed), resetting the instance (isolate kept) whenever a slice dies. */
+  async function alarmsOnly(h: Harness, limit: number) {
+    let fired = 0;
+    for (; fired < limit && !h.data.done && !h.data.invalid; fired++) {
+      if (h.store.alarm === null) break;
+      try {
+        await h.fireAlarm();
+      } catch {
+        h.reset(); // the instance was reset after running out of CPU; the isolate (and its warmth) survives
+      }
+    }
+    return fired;
+  }
+
+  it("warm slices that die (cold ones survive) can't loop: halved budgets reach checkpoints and the run is verified, with bounded rows", async () => {
+    const h = await started(cfg);
+    // Every chunk uploaded, none verified yet, the page closed.
+    let d = h.data;
+    for (const [k, upTo] of win.waveEnds.entries())
+      d = expectKind(decideUpload(d, USER, chunk(cfg, win.actions, d.queuedTo, upTo, k === 9 ? { final: true } : {}), LATE), "queue").data;
+    h.store.run = JSON.stringify(d);
+    h.store.alarm = h.now + BACKSTOP_MS;
+    h.reset();
+    // Full-budget warm slices run out of CPU; halved ones and cold ones fit.
+    h.store.dieWhen = ({ cold, budget }) => !cold && budget > SLICE_WORK / 2;
+    const rows = h.store.rows;
+    const fired = await alarmsOnly(h, 2000);
+    expect(h.data).toMatchObject({ done: true, invalid: false });
+    expect(h.data.finish!.outcome).toEqual(replay(cfg, win.actions, last).outcome);
+    expect(h.store.deaths).toBeGreaterThan(0);
+    // Every death was followed by progress to a checkpoint: deaths are bounded by the chunks, and so are rows.
+    expect(h.store.deaths).toBeLessThanOrEqual(10);
+    expect(h.store.rows - rows).toBeLessThan(10 * fired);
+    expect(fired).toBeLessThan(500);
+  });
+
+  it("warm slices that always die are given up after MAX_SLICE_DEATHS cold slices without a checkpoint", async () => {
+    const h = await started(cfg);
+    await h.send(big); // one long chunk: small cold slices can't reach its end
+    h.reset();
+    h.store.dieWhen = ({ cold }) => !cold;
+    const rows = h.store.rows;
+    const fired = await alarmsOnly(h, 1000);
+    expect(h.data).toMatchObject({ invalid: true, error: "Run could not be verified" });
+    expect(h.store.deaths).toBeLessThanOrEqual(MAX_SLICE_DEATHS + 1);
+    expect(fired).toBeLessThan(30);
+    expect(h.store.rows - rows).toBeLessThan(40);
   });
 
   it("a hash mismatch found in a later slice kills the run; later uploads and polls get ok: false", async () => {
