@@ -8,7 +8,7 @@ import { Card, Empty, PageHeader, Segmented } from "../components/ui";
 import { useMe } from "../lib/auth";
 import { fmtNum, timeAgo } from "../lib/format";
 
-type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals" | "pool";
+type GameKey = "tetris" | "snake" | "2048" | "mines" | "connect4" | "chess" | "generals" | "pool" | "mages";
 
 interface Column {
   label: string;
@@ -96,10 +96,14 @@ const BOARDS: Record<GameKey, { title: string; modes: { value: string; label: st
     title: "8-Ball Pool",
     modes: [vsComputer("pool")],
   },
+  mages: {
+    title: "Mage Siege",
+    modes: [{ value: "endless", label: "Endless", columns: [{ label: "Score", value: (e: ScoreEntry) => fmtNum(e.score), strong: true }, { label: "When", value: (e: ScoreEntry) => timeAgo(e.ts) }] }],
+  },
 };
 
 // Spelled out because Object.keys() would put the numeric-looking "2048" first.
-const GAME_KEYS: GameKey[] = ["tetris", "snake", "2048", "mines", "connect4", "chess", "generals", "pool"];
+const GAME_KEYS: GameKey[] = ["tetris", "snake", "2048", "mines", "connect4", "chess", "generals", "pool", "mages"];
 
 export default function Leaderboard() {
   const profile = useMe().user;

@@ -84,4 +84,13 @@ export const GAMES: GameMeta[] = [
     modes: ["8-Ball", "9-Ball", "vs computer"],
     gradient: "from-emerald-600/40 via-teal-700/30 to-amber-700/30",
   },
+  {
+    id: "mages",
+    title: "Mage Siege",
+    tagline: "Merge mages, master the terrain, hold the line.",
+    href: "/games/mages",
+    status: "live",
+    modes: ["Campaign", "Endless"],
+    gradient: "from-violet-700/40 via-indigo-800/30 to-amber-600/30",
+  },
 ];
