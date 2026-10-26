@@ -450,7 +450,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const magesInput = pathname.match(/^\/api\/mages\/runs\/([0-9a-f-]{36})\/input$/);
   if (magesInput && method === "POST") {
     const u = await requireUser(request, env);
-    const b = await body(request, 2_000_000);
+    const b = await body(request, 256_000);
     const res = await env.MAGE_RUN.get(env.MAGE_RUN.idFromName(magesInput[1])).input(u.id, b);
     return json(res, res.ok ? 200 : 400);
   }

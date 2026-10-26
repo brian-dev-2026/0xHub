@@ -1,14 +1,20 @@
-// Mage Siege run verification, without any storage: what the MageRun Durable
-// Object does with an uploaded chunk, with one verification slice and with its
-// alarm. Pure: the functions take the stored run and return decisions, never
-// mutating it (runSlice steps the Sim it is handed, which the caller owns).
+// Mage Siege run verification, without Workers APIs: what the MageRun Durable
+// Object does with uploads, polls and alarms.
 //
-// Workers on the free plan get about 10 ms of CPU per invocation, so an upload
-// only queues its chunk after cheap checks, and the sim is advanced through the
-// queue in slices of a fixed amount of work (SLICE_WORK), one per request,
-// poll or alarm. The final result is therefore confirmed with a short delay.
+// Workers' free plan gives about 10 ms of CPU per invocation and 100,000 SQLite
+// rows written per day (account-wide), so:
+// - an upload only queues its chunk (in the run row) after cheap checks;
+// - the sim is advanced through the queue in slices of a fixed amount of work,
+//   one per upload, poll or alarm, so the final result is confirmed with a delay;
+// - a slice that stays inside a chunk writes nothing (the sim lives in memory);
+//   the sim is checkpointed only at a verified chunk end, and a cold instance
+//   restarts from the last checkpoint (deterministic, so only work is repeated).
+//
+// The decisions (decideUpload, planAlarm, planSlice, runSlice, alarmJob) are pure;
+// MageRunCore runs them over an injected RunStore, so the orchestration and its
+// storage writes are tested here and MageRun only adapts Durable Object storage.
 
-import { MAX_ACTIONS, advanceSome, chunkBoundsError, outcomeOf, tickWork, validateActions } from "../shared/games/mages/chunk";
+import { MAX_ACTIONS, advanceSome, chunkBoundsError, outcomeOf, simToJson, validateActions } from "../shared/games/mages/chunk";
 import { TICK_HZ } from "../shared/games/mages/data";
 import type { Progress } from "../shared/games/mages/progress";
 import { hashSim, type Outcome } from "../shared/games/mages/replay";
@@ -50,10 +56,7 @@ export interface QueuedChunk {
   final: boolean;
 }
 
-/**
- * A run as stored (the sim snapshot and the queued chunks are stored beside it:
- * chunk number `headSeq + i` is the i-th one waiting).
- */
+/** A run as stored (its sim checkpoint and map are stored beside it). */
 export interface RunData {
   runId: string;
   userId: string;
@@ -65,12 +68,11 @@ export interface RunData {
   queuedTo: number;
   queuedHash: number;
   queuedFinal: boolean;
-  /** Sequence number of the oldest chunk waiting, and how many wait. */
-  headSeq: number;
-  waiting: number;
-  /** Tick the stored sim has reached; every chunk end up to it passed its hash check. */
+  /** Uploaded chunks waiting for verification, oldest first. */
+  queue: QueuedChunk[];
+  /** Tick of the stored sim checkpoint: the end of the last verified chunk. */
   simTo: number;
-  /** Slices begun since the last one that committed (one that never committed died, e.g. out of CPU). */
+  /** Cold slices begun since the last one that ended (one that never ended died, e.g. out of CPU). */
   attempts: number;
   /** When the run is discarded, unless chunks are still waiting for verification. */
   abandonAt: number;
@@ -91,37 +93,46 @@ export type UploadDecision =
   | { kind: "kill"; data: RunData; res: MageChunkResult }
   /** The run is done but its recording never completed: record data.finish again. */
   | { kind: "record"; data: RunData }
-  /** Store `chunk` as number `seq` with the updated run, then run a slice and answer with the status. */
-  | { kind: "queue"; data: RunData; chunk: QueuedChunk; seq: number }
-  /** A poll or a resent chunk: run a slice and answer with the status. */
+  /** Store the run with the chunk queued, then visit it as an upload. */
+  | { kind: "queue"; data: RunData }
+  /** A poll or a resent chunk: visit the run as a poll. */
   | { kind: "slice" };
 
 export type SliceOutcome =
-  /** Store the advanced sim, drop the first `popped` chunks (verified) and store the run; `work` was spent. */
-  | { kind: "progress"; data: RunData; popped: number; work: number }
+  /**
+   * The sim moved on (in memory). `checkpoint` is set when a chunk end was verified:
+   * store its sim and run (both at that chunk end); otherwise nothing needs storing.
+   */
+  | { kind: "progress"; checkpoint: { data: RunData; sim: string } | null; work: number }
   /** Store the dead run (queue and sim dropped). */
-  | { kind: "kill"; data: RunData }
+  | { kind: "kill"; data: RunData; work: number }
   /** Store the done run (queue and sim dropped, data.finish set, no result yet), then record data.finish. */
-  | { kind: "finish"; data: RunData };
+  | { kind: "finish"; data: RunData; work: number };
 
 export const CLOCK_TOLERANCE_MS = 3000;
 /** The client may play at up to 2x speed. */
 export const MAX_GAME_SPEED = 2;
-/** Most actions one chunk may carry (bounds the cost of an upload and of loading a chunk in a slice). */
+/** Most actions one chunk may carry (bounds the cost of an upload and of a slice). */
 export const MAX_CHUNK_ACTIONS = 2000;
 /** An idle run (no upload for this long, nothing waiting) is discarded; a finished one keeps its result this long. */
 export const ABANDON_AFTER_MS = 60 * 60 * 1000;
-/** While chunks wait, the alarm runs a slice this often. */
+/** Each upload arms the alarm this far ahead, so verification goes on if the page goes away. */
+export const BACKSTOP_MS = 15_000;
+/** An alarm finding a slice driven by a request this recently leaves the work to the requests. */
+export const DRIVEN_RECENTLY_MS = 5_000;
+/** While the alarm drives verification (no requests), it runs a slice this often. */
 export const SLICE_EVERY_MS = 1000;
 /** A done run whose recording failed is retried this often (until its abandon deadline). */
 export const RECORD_RETRY_MS = 60 * 1000;
 
 /**
- * Work units (tickWork per tick, plus one tick's worth per hash check) of one warm
- * slice. Calibrated with the bundled bench over the worst late-Endless waves so the
- * slowest warm slice, serialization included, stays under about 4 ms (Task 14b report).
+ * Work units of one warm slice (tickWork per tick, one per action, CHUNK_WORK per
+ * chunk end). Calibrated with the bundled bench over the worst late-Endless waves
+ * so the slowest warm slice stays under about 4 ms (Task 14b report).
  */
 export const SLICE_WORK = 6000;
+/** A chunk end costs about this much: the hash check and the checkpoint snapshot. */
+export const CHUNK_WORK = 1000;
 /**
  * The smallest budget, and what a slice gets in an isolate that has not verified
  * anything yet: code that has not run is interpreted and compiled as it goes (the
@@ -133,30 +144,37 @@ export const MIN_SLICE_WORK = Math.floor(SLICE_WORK / 32);
 export const WARMUP_RATIO = 8;
 /** A slice that has to restore the sim from storage first gets this fraction. */
 const RESTORE_DIVISOR = 4;
-/** After this many slices in a row that died without committing, the run is given up. */
-export const MAX_SLICE_DEATHS = 8;
+/**
+ * After this many cold slices in a row that died, the run is given up. Below
+ * Cloudflare's 6 retries of a failed alarm, so the run is given up (and later
+ * discarded) even if only those retries are left to drive it.
+ */
+export const MAX_SLICE_DEATHS = 5;
 
 export function newRun(runId: string, userId: string, cfg: SimConfig, now: number): { data: RunData; sim: Sim } {
   const sim = createSim(cfg);
   const data: RunData = {
     runId, userId, createdAt: now, cfg, actions: 0, queuedTo: 0, queuedHash: hashSim(sim), queuedFinal: false,
-    headSeq: 0, waiting: 0, simTo: 0, attempts: 0, abandonAt: now + ABANDON_AFTER_MS,
+    queue: [], simTo: 0, attempts: 0, abandonAt: now + ABANDON_AFTER_MS,
     invalid: false, error: null, done: false, finish: null, result: null,
   };
   return { data, sim };
 }
 
+/** Chunks wait and the run is alive. */
+export const isRunnable = (data: RunData): boolean => !data.invalid && !data.done && data.queue.length > 0;
+
 /** The run marked dead: nothing waits any more, and every later request gets `error`. */
 function killed(data: RunData, error: string, now: number): RunData {
-  return { ...data, invalid: true, error, headSeq: data.headSeq + data.waiting, waiting: 0, attempts: 0, abandonAt: now + ABANDON_AFTER_MS };
+  return { ...data, invalid: true, error, queue: [], attempts: 0, abandonAt: now + ABANDON_AFTER_MS };
 }
 
-/** What the run answers now: its error, its final result, or how far verification has come. */
-export function statusOf(data: RunData): MageChunkResult {
+/** What the run answers now: its error, its final result, or how far verification has come (`simTick`: the live sim's tick). */
+export function statusOf(data: RunData, simTick = 0): MageChunkResult {
   if (data.invalid) return { ok: false, error: data.error ?? "Run failed verification" };
   if (data.done && data.result) return data.result;
-  const pending = data.done || data.waiting > 0;
-  return { ok: true, pending, verifiedTo: data.simTo, queuedTo: data.queuedTo };
+  const pending = data.done || data.queue.length > 0;
+  return { ok: true, pending, verifiedTo: data.done ? data.simTo : Math.max(data.simTo, simTick), queuedTo: data.queuedTo };
 }
 
 /**
@@ -193,19 +211,18 @@ export function decideUpload(data: RunData | null, userId: string, batch: Record
   const actions = validateActions(batch.actions, data.queuedTo, upTo, max);
   if (typeof actions === "string") return kill(actions === "too many actions" ? "Too many actions" : `Malformed input: ${actions}`);
 
-  const seq = data.headSeq + data.waiting;
   const next: RunData = {
     ...data, actions: data.actions + actions.length, queuedTo: upTo, queuedHash: h, queuedFinal: final,
-    waiting: data.waiting + 1, abandonAt: now + ABANDON_AFTER_MS,
+    queue: [...data.queue, { upTo, actions, h, final }], abandonAt: now + ABANDON_AFTER_MS,
   };
-  return { kind: "queue", data: next, chunk: { upTo, actions, h, final }, seq };
+  return { kind: "queue", data: next };
 }
 
 /**
  * Budget of one slice: up to 1/WARMUP_RATIO of the work this isolate has already
- * done (its JIT warms up as it works) and at most SLICE_WORK; a quarter of that when the sim
- * must be restored first; halved for every earlier attempt that died; never
- * below MIN_SLICE_WORK.
+ * done (its JIT warms up as it works) and at most SLICE_WORK; a quarter of that
+ * when the sim must be restored first; halved for every earlier cold slice that
+ * died; never below MIN_SLICE_WORK.
  */
 export function sliceBudget(simCached: boolean, died: number, isolateWork: number): number {
   const warmed = Math.min(SLICE_WORK, Math.max(MIN_SLICE_WORK, Math.floor(isolateWork / WARMUP_RATIO)));
@@ -213,47 +230,69 @@ export function sliceBudget(simCached: boolean, died: number, isolateWork: numbe
   return Math.max(MIN_SLICE_WORK, Math.floor(base / 2 ** Math.min(died, 30)));
 }
 
+export type VisitKind = "upload" | "poll" | "alarm";
+
 /**
- * Starts a slice: null when nothing waits (or the run is over), a kill when too
- * many slices died in a row, otherwise the run with this attempt counted (store
- * it durably before running the slice) and how many earlier attempts died.
+ * The alarm part of a visit to a runnable run, decided before anything risky:
+ * `arm` is set durably first (null: leave the alarm as it is), then a slice runs
+ * if `slice`.
+ * - upload: arm the backstop BACKSTOP_MS ahead, and slice;
+ * - poll: no write, and slice;
+ * - alarm: if a request drove a slice in the last DRIVEN_RECENTLY_MS, only re-arm
+ *   the backstop; otherwise the alarm drives verification: arm the next slice
+ *   (SLICE_EVERY_MS ahead) before slicing, so a slice that dies (out of CPU) always
+ *   has a successor.
  */
-export function beginSlice(data: RunData | null, now: number): { kind: "run"; data: RunData; died: number } | { kind: "kill"; data: RunData } | null {
-  if (!data || data.invalid || data.done || data.waiting === 0) return null;
+export function planAlarm(kind: VisitKind, now: number, lastDrivenAt: number): { arm: number | null; slice: boolean } {
+  if (kind === "upload") return { arm: now + BACKSTOP_MS, slice: true };
+  if (kind === "poll") return { arm: null, slice: true };
+  if (now - lastDrivenAt < DRIVEN_RECENTLY_MS) return { arm: now + BACKSTOP_MS, slice: false };
+  return { arm: now + SLICE_EVERY_MS, slice: true };
+}
+
+export type SlicePlan = { kind: "warm"; budget: number } | { kind: "cold"; counted: RunData; budget: number } | { kind: "kill"; data: RunData };
+
+/**
+ * How to run a slice now: null when nothing waits; warm (the sim is in memory: no
+ * write at all); cold (the sim must be restored: store `counted`, the run with this
+ * attempt counted, durably first, so if this slice dies the next one knows and
+ * halves its budget); or kill, when MAX_SLICE_DEATHS cold slices died in a row.
+ * A warm slice that dies takes the instance with it, so the next slice is cold
+ * and counted.
+ */
+export function planSlice(data: RunData, simCached: boolean, isolateWork: number, now: number): SlicePlan | null {
+  if (!isRunnable(data)) return null;
+  if (simCached) return { kind: "warm", budget: sliceBudget(true, 0, isolateWork) };
   if (data.attempts >= MAX_SLICE_DEATHS) return { kind: "kill", data: killed(data, "Run could not be verified", now) };
-  return { kind: "run", data: { ...data, attempts: data.attempts + 1 }, died: data.attempts };
+  return { kind: "cold", counted: { ...data, attempts: data.attempts + 1 }, budget: sliceBudget(false, data.attempts, isolateWork) };
 }
 
 /**
- * One verification slice: steps `sim` (at data.simTo; the caller's to mutate)
- * through the waiting chunks (`chunkAt(i)` is the i-th, loaded only when
- * reached) until `budget` work units are spent, checking the hash at every chunk
- * end. A run whose game ends (or whose final chunk is reached) finishes; chunks
- * queued after that are dropped.
+ * One verification slice: steps `sim` (the caller's, at or after data.simTo inside
+ * the first waiting chunk) through the waiting chunks until `budget` work units are
+ * spent, checking the hash at every chunk end. The last chunk end reached becomes
+ * the checkpoint. A run whose game ends (or whose final chunk is reached)
+ * finishes; chunks queued after that are dropped.
  */
-export function runSlice(data: RunData, chunkAt: (i: number) => QueuedChunk | undefined, sim: Sim, budget: number, now: number): SliceOutcome {
-  const kill = (error: string): SliceOutcome => ({ kind: "kill", data: killed(data, error, now) });
+export function runSlice(data: RunData, sim: Sim, budget: number, now: number): SliceOutcome {
   let left = budget;
-  let popped = 0;
-  while (popped < data.waiting) {
-    const c = chunkAt(popped);
-    if (!c) return kill("Run failed verification: lost chunk");
+  const spent = () => budget - left;
+  const kill = (error: string): SliceOutcome => ({ kind: "kill", data: killed(data, error, now), work: spent() });
+  let checkpoint: { data: RunData; sim: string } | null = null;
+  for (let i = 0; i < data.queue.length; ) {
+    const c = data.queue[i];
     const r = advanceSome(sim, c.actions, c.upTo, left);
     if (!r.ok) return kill(`Run failed verification: ${r.error}`);
     left -= r.work;
     if (!r.reached) break;
-    left -= tickWork(sim); // the hash costs about one tick
+    left -= CHUNK_WORK;
     if (hashSim(sim) !== c.h) return kill("Run failed verification");
-    popped++;
-    if (sim.phase === "won" || sim.phase === "lost" || c.final) return { kind: "finish", data: finished(data, sim, now) };
+    i++;
+    if (sim.phase === "won" || sim.phase === "lost" || c.final) return { kind: "finish", data: finished(data, sim, now), work: spent() };
+    checkpoint = { data: { ...data, queue: data.queue.slice(i), simTo: sim.tick, attempts: 0 }, sim: simToJson(sim) };
     if (left <= 0) break;
   }
-  return {
-    kind: "progress",
-    popped,
-    work: budget - left,
-    data: { ...data, simTo: sim.tick, headSeq: data.headSeq + popped, waiting: data.waiting - popped, attempts: 0 },
-  };
+  return { kind: "progress", checkpoint, work: spent() };
 }
 
 /**
@@ -265,23 +304,187 @@ function finished(data: RunData, sim: Sim, now: number): RunData {
   const outcome = outcomeOf(sim);
   const record = mode === "stage" ? (outcome.won ? "stage" : "none") : outcome.wavesCleared > 0 ? "endless" : "none";
   const finish: Finish = { mode, stage, team, outcome, durationMs: Math.round((outcome.ticks / TICK_HZ) * 1000), record };
-  return {
-    ...data, simTo: sim.tick, headSeq: data.headSeq + data.waiting, waiting: 0, attempts: 0,
-    done: true, finish, result: null, abandonAt: now + ABANDON_AFTER_MS,
-  };
+  return { ...data, simTo: sim.tick, queue: [], attempts: 0, done: true, finish, result: null, abandonAt: now + ABANDON_AFTER_MS };
 }
 
-/** What the alarm does now: verify a slice, retry the recording, discard the run, or nothing. */
-export function alarmJob(data: RunData, now: number): "slice" | "record" | "discard" | "wait" {
+/** What the alarm does now: visit (verify or re-arm), retry the recording, discard the run, or re-arm for later. */
+export function alarmJob(data: RunData, now: number): "visit" | "record" | "discard" | "wait" {
   // A run with chunks waiting is never discarded: the backlog is verified (or the run dies) first.
-  if (!data.invalid && !data.done && data.waiting > 0) return "slice";
+  if (isRunnable(data)) return "visit";
   if (now >= data.abandonAt) return "discard";
   return data.done && !data.result ? "record" : "wait";
 }
 
-/** When the alarm should fire next: the single alarm slot serves slices, recording retries and the abandon timer. */
+/** When the alarm should fire for a run with nothing to verify: a recording retry or the abandon deadline. */
 export function nextAlarm(data: RunData, now: number): number {
-  if (!data.invalid && !data.done && data.waiting > 0) return now + SLICE_EVERY_MS;
+  if (isRunnable(data)) return now + SLICE_EVERY_MS;
   if (data.done && !data.result) return Math.min(data.abandonAt, now + RECORD_RETRY_MS);
   return data.abandonAt;
+}
+
+// ---------- orchestration over storage ----------
+
+/** The storage MageRunCore runs on (Durable Object storage in MageRun, a fake in tests). */
+export interface RunStore {
+  loadRun(): RunData | null;
+  /** One row. */
+  saveRun(data: RunData): void;
+  /** A new run with its sim and map (three rows, one transaction). */
+  createRun(data: RunData, sim: string, map: string): void;
+  /** The stored checkpoint, restored. */
+  loadSim(): Sim;
+  /** A verified chunk end: the sim and the run (two rows, one transaction). */
+  saveCheckpoint(sim: string, data: RunData): void;
+  /** A run that is over (dead or done): drops its sim and map and stores the run (one transaction). */
+  saveOver(data: RunData): void;
+  /** One row. */
+  setAlarm(at: number): Promise<void>;
+  /** Resolves once everything written so far is durable. */
+  sync(): Promise<void>;
+  /** Erases the run and its alarm. */
+  clear(): Promise<void>;
+  /** Writes a done run's result to D1 (safe to repeat) and returns the final response. */
+  record(data: RunData): Promise<MageChunkResult>;
+  /** Tests only: told just before a slice runs. */
+  trace?(event: "slice"): void;
+}
+
+/**
+ * One run's orchestration, kept in memory between invocations while the instance
+ * lives: the stored run, the live sim (at or past the checkpoint, inside the first
+ * waiting chunk), when a request last drove a slice, and the isolate's warmth.
+ */
+export class MageRunCore {
+  private data: RunData | null | undefined = undefined;
+  private sim: Sim | null = null;
+  private lastDrivenAt = 0;
+  /** A cold slice is waiting for its attempt to be stored: no other slice may start. */
+  private coldSlice = false;
+
+  constructor(
+    private store: RunStore,
+    /** Verification work done in this isolate (shared by all its runs). */
+    private warmth: { work: number },
+    private clock: () => number,
+  ) {}
+
+  private load(): RunData | null {
+    if (this.data === undefined) this.data = this.store.loadRun();
+    return this.data;
+  }
+
+  private save(data: RunData) {
+    this.store.saveRun(data);
+    this.data = data;
+  }
+
+  private over(data: RunData) {
+    this.store.saveOver(data);
+    this.data = data;
+    this.sim = null;
+  }
+
+  async init(runId: string, userId: string, cfg: SimConfig): Promise<void> {
+    if (this.load()) throw new Error("run already exists");
+    const now = this.clock();
+    const { data, sim } = newRun(runId, userId, cfg, now);
+    // The map never changes; storing it saves regenerating it on every restore.
+    this.store.createRun(data, simToJson(sim), JSON.stringify(sim.map));
+    this.data = data;
+    this.sim = sim;
+    await this.store.setAlarm(nextAlarm(data, now));
+  }
+
+  async input(userId: string, batch: Record<string, unknown>): Promise<MageChunkResult> {
+    const now = this.clock();
+    const d = decideUpload(this.load(), userId, batch, now);
+    switch (d.kind) {
+      case "reply":
+        return d.res;
+      case "kill":
+        this.over(d.data);
+        await this.store.setAlarm(nextAlarm(d.data, now));
+        return d.res;
+      case "queue":
+        this.save(d.data);
+        await this.visit("upload", now);
+        break;
+      case "slice":
+        await this.visit("poll", now);
+        break;
+      case "record":
+        break;
+    }
+    await this.recordIfDone();
+    // (Only an alarm discarding the run while this request waited leaves no run.)
+    return this.data ? statusOf(this.data, this.sim?.tick) : { ok: false, error: "Unknown run" };
+  }
+
+  async alarm(): Promise<void> {
+    const now = this.clock();
+    const data = this.load();
+    const job = data ? alarmJob(data, now) : "discard";
+    if (job === "discard") {
+      await this.store.clear(); // abandoned or dead run, or a finished one's kept result
+      this.data = null;
+      this.sim = null;
+      return;
+    }
+    if (job === "visit") {
+      await this.visit("alarm", now);
+      // Still verifying: the alarm armed by the visit stands.
+      if (this.data && isRunnable(this.data)) return;
+    }
+    await this.recordIfDone();
+    if (this.data) await this.store.setAlarm(nextAlarm(this.data, this.clock()));
+  }
+
+  /** One visit to a run: arm the alarm as planned, then run at most one slice. */
+  private async visit(kind: VisitKind, now: number): Promise<void> {
+    if (!this.data || !isRunnable(this.data)) return;
+    const { arm, slice } = planAlarm(kind, now, this.lastDrivenAt);
+    if (arm !== null) await this.store.setAlarm(arm);
+    if (!slice || this.coldSlice || !this.data) return;
+    const plan = planSlice(this.data, this.sim !== null, this.warmth.work, now);
+    if (!plan) return;
+    if (plan.kind === "kill") return this.over(plan.data);
+    if (plan.kind === "cold") {
+      this.coldSlice = true;
+      try {
+        this.save(plan.counted);
+        await this.store.sync();
+      } finally {
+        this.coldSlice = false;
+      }
+    }
+    // Other events may have run while this one waited for storage (uploads only: no slice could start).
+    const data = this.data;
+    if (!data || !isRunnable(data)) return;
+    const cold = this.sim === null;
+    const sim = this.sim ?? this.store.loadSim();
+    this.sim = null; // dropped while it is stepped; kept again once the slice has ended well
+    this.store.trace?.("slice");
+    const out = runSlice(data, sim, plan.budget, now);
+    this.warmth.work += out.work;
+    if (kind !== "alarm") this.lastDrivenAt = now;
+    if (out.kind !== "progress") return this.over(out.data);
+    if (out.checkpoint) {
+      this.store.saveCheckpoint(out.checkpoint.sim, out.checkpoint.data);
+      this.data = out.checkpoint.data;
+    } else if (cold) this.save({ ...data, attempts: 0 }); // the cold slice survived
+    this.sim = sim;
+  }
+
+  /** A done run not yet recorded is recorded now; a failure is retried by a later request or the alarm. */
+  private async recordIfDone(): Promise<void> {
+    const data = this.data;
+    if (!data?.done || data.result || !data.finish) return;
+    try {
+      const result = await this.store.record(data);
+      // Over the run as it is now (another event may have stored it while D1 was written).
+      if (this.data) this.save({ ...this.data, result });
+    } catch (e) {
+      console.error("mages: recording failed", data.runId, e);
+    }
+  }
 }

@@ -213,7 +213,7 @@ export function tickWork(sim: Sim): number {
 
 /**
  * Steps `sim` toward `upTo` with its chunk's actions, stopping once `budget` work
- * units (tickWork per tick) are spent; at least one tick is stepped while
+ * units (tickWork per tick, plus one per action) are spent; at least one tick is stepped while
  * `sim.tick < upTo`. Resumable: actions before `sim.tick` were fed by an earlier
  * call and are skipped, so calling it again, also on a restored copy, continues
  * exactly where it stopped. `actions` must be sorted with every `t` in [chunk
@@ -235,7 +235,7 @@ export function advanceSome(
     if (sim.phase === "won" || sim.phase === "lost") return { ok: false, error: "chunk runs past the end of the game" };
     batch.length = 0;
     while (next < actions.length && actions[next].t === sim.tick) batch.push(actions[next++]);
-    work += tickWork(sim);
+    work += tickWork(sim) + batch.length;
     const rejected = sim.rejected;
     step(sim, batch);
     if (sim.rejected !== rejected) return { ok: false, error: "illegal action" };
