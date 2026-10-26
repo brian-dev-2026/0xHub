@@ -24,6 +24,7 @@ export const CHUNK_TICKS: number;
 export const MAX_CHUNK_ACTIONS: number;
 export const REQUEST_TIMEOUT_MS: number;
 export const POLL_EVERY_MS: number;
+export const BEHIND_RETRY_MS: number;
 export const POLL_FOR_MS: number;
 
 export interface SubmitApi {

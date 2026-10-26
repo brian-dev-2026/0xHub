@@ -50,6 +50,12 @@ export const POLL_EVERY_MS = 500;
 /** Polling gives up after this long; the server's alarm chain still finishes and records the run. */
 export const POLL_FOR_MS = 3 * 60 * 1000;
 
+/**
+ * An upload refused with `retry: true` ("Verification is behind: send this again later") was not stored but the run is
+ * fine: it stays pending and goes again after this long, with polls driving verification meanwhile.
+ */
+export const BEHIND_RETRY_MS = 5000;
+
 /** Refusals that only mean the server already has this data (drop the chunk and carry on). */
 const ALREADY_HAVE = /^(chunk already received|run already finished)/i;
 
@@ -74,6 +80,9 @@ export function createRunSubmitter(api, runId, handlers, batches = []) {
   let lastUpTo = 0, logIdx = 0, lastPostAt = Date.now();
   /** How far the server says it has verified and queued, and when the last poll during play went out. */
   let verifiedTo = 0, queuedTo = 0, lastPollAt = 0;
+  /** Until then the head chunk is held back because the server is behind (`retry: true`); polls run instead. */
+  let holdUntil = 0;
+  const held = () => queue.length > 0 && Date.now() < holdUntil;
   const note = res => { if (typeof res.verifiedTo === 'number' && typeof res.queuedTo === 'number') { verifiedTo = res.verifiedTo; queuedTo = res.queuedTo; } };
   /** The final chunk is stored on the server; `polling` while the results screen waits; `done` once answered for good. */
   let finalStored = false, polling = true, pollUntil = 0, done = false;
@@ -91,8 +100,8 @@ export function createRunSubmitter(api, runId, handlers, batches = []) {
     } finally { clearTimeout(expire); if (inFlight === ctl) inFlight = null; }
   }
   /** What a waiting timer does next: send what is unsent, or poll for the result once only that is outstanding. */
-  const next = () => (queue.length ? pump() : finalStored ? poll() : undefined);
-  const schedule = ms => { clearTimeout(timer); timer = setTimeout(next, ms); };
+  const next = () => (held() ? poll(true) : queue.length ? pump() : finalStored ? poll() : undefined);
+  const schedule = ms => { clearTimeout(timer); timer = setTimeout(() => { timer = 0; next(); }, ms); };
   const keepPolling = () => {
     if (stopped || !polling || !finalStored || queue.length) return;
     if (Date.now() > pollUntil) polling = false; // the alarm chain on the server finishes the job
@@ -100,11 +109,12 @@ export function createRunSubmitter(api, runId, handlers, batches = []) {
   };
   const finishWith = res => { done = true; stopped = true; clearTimeout(timer); clearPendingRun(); onResult(res); };
   const reject = error => { done = true; stopped = true; clearTimeout(timer); clearPendingRun(); onReject(error); };
-  /** A refusal that only says the server already has the data is not fatal (worker/mages.ts contract). */
-  const fatal = res => res.ok === false && !ALREADY_HAVE.test(String(res.error || ''));
+  /** A refusal that only says the server already has the data, or to send again later, is not fatal (worker/mages.ts contract). */
+  const fatal = res => res.ok === false && res.retry !== true && !ALREADY_HAVE.test(String(res.error || ''));
 
   async function pump() {
     if (busy || stopped) return;
+    if (held()) { if (!timer) schedule(PLAY_POLL_FAST_MS); return; } // a held chunk waits; its timer polls meanwhile
     clearTimeout(timer); timer = 0;
     busy = true;
     try {
@@ -117,6 +127,13 @@ export function createRunSubmitter(api, runId, handlers, batches = []) {
           const fin = hasFinal();
           onStatus('failed', fin);
           if (!fin) schedule(Math.min(20000, 2000 * 2 ** Math.min(4, failures - 1)));
+          return;
+        }
+        if (res.ok === false && res.retry === true) {
+          // Not stored, run fine: keep it (and everything after it) pending, poll for a while, then send it again
+          failures = 0;
+          holdUntil = Date.now() + BEHIND_RETRY_MS;
+          schedule(PLAY_POLL_FAST_MS);
           return;
         }
         if (fatal(res)) { reject(res.error || 'Run could not be verified'); return; }
@@ -147,7 +164,8 @@ export function createRunSubmitter(api, runId, handlers, batches = []) {
       if (res && fatal(res)) { reject(res.error || 'Run could not be verified'); return; }
       if (res && res.ok === true) { note(res); if (!midRun) onProgress(res.verifiedTo ?? 0, res.queuedTo ?? 0); }
     } finally { busy = false; }
-    if (midRun) { if (queue.length) pump(); } else keepPolling();
+    if (held()) schedule(PLAY_POLL_FAST_MS); // keep verification moving until the held chunk may go again
+    else if (midRun) { if (queue.length) pump(); } else keepPolling();
   }
 
   /** Queues the actions since the last chunk with the sim's hash at this tick (hashSim's unsigned value, untouched). */

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashSim } from "../../../shared/games/mages/replay";
 import { createSim, step, type Action, type Sim, type SimConfig, type SimEvent } from "../../../shared/games/mages/sim";
 import {
-  CHUNK_TICKS, LAG_TICKS, PLAY_POLL_EVERY_MS, PLAY_POLL_FAST_MS, POLL_EVERY_MS, POLL_FOR_MS, POST_EVERY_MS, REQUEST_TIMEOUT_MS, createRunSubmitter, loadPendingRun, savePendingRun, takePendingRun,
+  BEHIND_RETRY_MS, CHUNK_TICKS, LAG_TICKS, PLAY_POLL_EVERY_MS, PLAY_POLL_FAST_MS, POLL_EVERY_MS, POLL_FOR_MS, POST_EVERY_MS, REQUEST_TIMEOUT_MS, createRunSubmitter, loadPendingRun, savePendingRun, takePendingRun,
   type PendingBatch,
 } from "./submit";
 
@@ -359,6 +359,45 @@ describe("deferred verification (Task 14b)", () => {
     expect(slow).toBeGreaterThanOrEqual(1);
     expect(slow).toBeLessThanOrEqual(2);
     expect(PLAY_POLL_FAST_MS).toBeLessThan(PLAY_POLL_EVERY_MS);
+  });
+
+  it("'send this again later' (retry: true) keeps the chunk pending, polls, then resends it; later chunks wait behind it", async () => {
+    const api = stubApi(), h = handlers(), sim = createSim(cfg), log: Action[] = [];
+    const sub = createRunSubmitter(api, "run-b", h);
+    step(sim, []);
+    sub.afterTick(sim, log, [{ type: "waveEnd", wave: 1, bonus: 25 }]);
+    await flush();
+    const first = api.calls[0].batch;
+    api.calls[0].answer({ ok: false, error: "Verification is behind: send this again later", retry: true });
+    await flush();
+    expect(h.onReject).not.toHaveBeenCalled();
+    expect(loadPendingRun()!.batches).toEqual([first]); // still stored
+    // A later chunk queues behind it and is not sent yet
+    step(sim, []);
+    sub.finish(sim, log);
+    await flush();
+    expect(api.calls).toHaveLength(1);
+    // Polls drive verification meanwhile
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(PLAY_POLL_FAST_MS);
+      const last = api.calls[api.calls.length - 1];
+      expect(last.batch).toEqual({ poll: true });
+      last.answer({ ok: true, pending: true, verifiedTo: 10 * i, queuedTo: 300 });
+      await flush();
+    }
+    await vi.advanceTimersByTimeAsync(BEHIND_RETRY_MS);
+    const uploads = () => api.calls.filter((c) => !c.batch.poll);
+    // Answer any outstanding poll so the held chunk can go again
+    for (let k = 0; k < 4 && uploads().length < 2; k++) {
+      const last = api.calls[api.calls.length - 1];
+      if (last.batch.poll) last.answer({ ok: true, pending: true, verifiedTo: 200, queuedTo: 300 });
+      await vi.advanceTimersByTimeAsync(PLAY_POLL_FAST_MS);
+    }
+    expect(uploads()[1].batch).toEqual(first); // the same chunk, resent first
+    uploads()[1].answer({ ok: true, pending: true, verifiedTo: 200, queuedTo: first.upTo });
+    await flush();
+    expect(uploads()[2].batch.final).toBe(true);
+    expect(h.onReject).not.toHaveBeenCalled();
   });
 
   it("stop() and drop() abort the request in flight", async () => {
