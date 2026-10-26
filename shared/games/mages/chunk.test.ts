@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { secs } from "./data";
-import { CHUNK_SECS, advance, outcomeOf, restoreSim, serializeSim, validateActions } from "./chunk";
+import { CHUNK_SECS, advance, advanceSome, chunkBoundsError, outcomeOf, restoreSim, serializeSim, simFromJson, simToJson, tickWork, validateActions } from "./chunk";
 import { COST_SCRIPT, STRONG, endlessCfg, play, rankedTiles, stageCfg } from "./play.testutil";
 import { MAX_ACTIONS, hashSim, maxTicksFor, replay } from "./replay";
+import { generateMap } from "./map";
 import { restoreRng, makeRng } from "./rng";
 import { createSim, spawnForTest, step, type Action, type Sim } from "./sim";
 
@@ -197,6 +198,116 @@ describe("mage siege chunks", () => {
     // Bad action lists are refused before anything is simulated.
     expect(hashSim(sim)).toBe(before);
     expect(advance(sim, [{ t: 25, type: "place", mage: "earth", tile }], 40)).toEqual({ ok: false, error: "illegal action" });
+  });
+
+  it("simToJson and simFromJson round-trip like serializeSim and restoreSim", () => {
+    const a = createSim(endlessCfg({ __noLeak: true }));
+    stepTo(a, cost.actions, cost.waveEnds[11] + secs(30));
+    expect(JSON.parse(simToJson(a))).toEqual(serializeSim(a));
+    const b = simFromJson(simToJson(a));
+    expect(hashSim(b)).toBe(hashSim(a));
+    expect(serializeSim(b)).toEqual(serializeSim(a));
+    // With a stored copy of the map (as the server keeps it), the sim steps on exactly as the original.
+    const c = simFromJson(simToJson(a), JSON.parse(JSON.stringify(a.map)));
+    expect(c.map).toEqual(generateMap(a.cfg.seed));
+    stepTo(a, cost.actions, cost.waveEnds[13]);
+    stepTo(c, cost.actions, cost.waveEnds[13]);
+    expect(hashSim(c)).toBe(hashSim(a));
+    expect(hashSim(c)).toBe(cost.hashes[13]);
+    expect(() => simFromJson(simToJson(a), generateMap(a.cfg.seed + 1))).toThrow("map of another seed");
+  });
+
+  it("chunkBoundsError counts the chunk length from the chunk start", () => {
+    const cfg = stageCfg();
+    expect(chunkBoundsError(cfg, 100, 100)).toBeNull();
+    expect(chunkBoundsError(cfg, 100, 100 + secs(CHUNK_SECS))).toBeNull();
+    expect(chunkBoundsError(cfg, 100, 101 + secs(CHUNK_SECS))).toBe("chunk too long");
+    expect(chunkBoundsError(cfg, 100, 99)).toBe("bad chunk end");
+    expect(chunkBoundsError(cfg, 100, 100.5)).toBe("bad chunk end");
+    const max = maxTicksFor(cfg);
+    expect(chunkBoundsError(cfg, max - 10, max + 1)).toBe("chunk past the tick limit");
+  });
+
+  it("advanceSome stops at its work budget and resumes mid-chunk", () => {
+    const cfg = stageCfg();
+    const from = win.waveEnds[3];
+    const upTo = win.waveEnds[4];
+    const acts = win.actions.filter((a) => a.t >= from && a.t < upTo);
+    expect(acts.length).toBeGreaterThan(1);
+    const whole = createSim(cfg);
+    stepTo(whole, win.actions, from);
+    let sim = roundTrip(whole);
+    expect(advance(whole, acts, upTo)).toEqual({ ok: true });
+
+    // A zero budget still steps one tick, so every slice makes progress.
+    const one = advanceSome(sim, acts, upTo, 0);
+    expect(one).toEqual({ ok: true, reached: false, work: expect.any(Number) });
+    expect(tickWork(sim)).toBeGreaterThanOrEqual(1 + sim.mages.length);
+    expect(sim.tick).toBe(from + 1);
+
+    let slices = 0;
+    for (;;) {
+      const before = sim.tick;
+      const r = advanceSome(sim, acts, upTo, 300);
+      if (!r.ok) throw new Error(r.error);
+      slices++;
+      expect(sim.tick).toBeGreaterThan(before);
+      // It stops as soon as the budget is spent: never more than one tick past it.
+      if (!r.reached) expect(r.work).toBeGreaterThanOrEqual(300);
+      if (r.reached) break;
+      sim = simFromJson(simToJson(sim));
+    }
+    expect(slices).toBeGreaterThan(3);
+    expect(sim.tick).toBe(upTo);
+    expect(hashSim(sim)).toBe(hashSim(whole));
+  });
+
+  it("advanceSome reports illegal actions and a game that ends early", () => {
+    const sim = createSim(stageCfg());
+    const tile = rankedTiles(sim)[0];
+    stepTo(sim, [], 20);
+    expect(advanceSome(sim, [{ t: 25, type: "place", mage: "earth", tile }], 40, Infinity)).toEqual({ ok: false, error: "illegal action" });
+    const over = createSim(stageCfg());
+    stepTo(over, win.actions, win.sim.tick);
+    expect(advanceSome(over, [], win.sim.tick + 1, Infinity)).toEqual({ ok: false, error: "chunk runs past the end of the game" });
+  });
+
+  it("verifying in slices of random budgets equals one replay", () => {
+    const rng = makeRng(2024);
+    for (const [cfg, run] of [[stageCfg(), win], [endlessCfg({ __noLeak: true }), cost]] as const) {
+      // The client's chunks: every 120 ticks (2 s at 2x speed) and at every wave end.
+      const ends: number[] = [];
+      for (const waveEnd of run.waveEnds) {
+        let t = ends.length ? ends[ends.length - 1] : 0;
+        while (t + 120 < waveEnd) ends.push((t += 120));
+        ends.push(waveEnd);
+      }
+      // Reference: straight stepping, hashed at every chunk end.
+      const ref = createSim(cfg);
+      const refHashes = ends.map((end) => (stepTo(ref, run.actions, end), hashSim(ref)));
+
+      let json = simToJson(createSim(cfg));
+      const hashes: number[] = [];
+      let from = 0;
+      for (const upTo of ends) {
+        const acts = validateActions(JSON.parse(JSON.stringify(run.actions.filter((a) => a.t >= from && a.t < upTo))), from, upTo, MAX_ACTIONS);
+        if (typeof acts === "string") throw new Error(acts);
+        for (;;) {
+          // Each slice restores from JSON, as a cold server would.
+          const sim = simFromJson(json);
+          const r = advanceSome(sim, acts, upTo, 1 + Math.floor(rng.next() * 4000));
+          if (!r.ok) throw new Error(r.error);
+          json = simToJson(sim);
+          if (r.reached) {
+            hashes.push(hashSim(sim));
+            break;
+          }
+        }
+        from = upTo;
+      }
+      expect(hashes).toEqual(refHashes);
+      expect(outcomeOf(simFromJson(json))).toEqual(replay(cfg, run.actions, run.sim.tick).outcome);
+    }
   });
 
   it("per-wave hash sequence is pinned", () => {

@@ -1,9 +1,10 @@
-// Mage Siege per-wave verification. The server keeps a run's Sim between
-// requests (as a plain-JSON snapshot) and advances it one chunk at a time with the
-// client's actions; replay.ts verifies a whole log with the same pieces.
+// Mage Siege chunked verification. The server keeps a run's Sim between
+// requests (as a plain-JSON snapshot) and advances it through the client's chunks
+// a work-budgeted slice at a time (advanceSome); replay.ts verifies a whole log
+// with the same pieces.
 
 import { ENDLESS_MAX_WAVES, MAGES, SPELLS, TRAPS, W, H, secs, type MageId, type SpellId, type TrapId } from "./data";
-import { generateMap } from "./map";
+import { generateMap, type GameMap } from "./map";
 import { restoreRng } from "./rng";
 import { stars, step, type Action, type Enemy, type Mage, type Sim, type SimConfig } from "./sim";
 import { STAGE_WAVES } from "./waves";
@@ -22,7 +23,7 @@ export interface Outcome {
 export const MAX_ACTIONS = 20_000;
 /** Longest a single wave (with its build break) may take when bounding a replay. */
 const MAX_WAVE_SECS = 120;
-/** Longest one chunk may run, counted from the tick its wave or build break began. */
+/** Longest one chunk may run, counted from the chunk's start (the previous chunk's end). */
 export const CHUNK_SECS = 150;
 const TILES = W * H;
 
@@ -55,26 +56,49 @@ export type SimSnapshot = Omit<Sim, "map" | "rng" | "combatRng" | "enemies" | "m
   combatRng: number;
 };
 
-/** Plain-JSON copy of the sim's state (shares nothing with `sim`). */
-export function serializeSim(sim: Sim): SimSnapshot {
+/** The snapshot's fields, still sharing objects with `sim` (only for serializing at once). */
+function snapshotOf(sim: Sim): SimSnapshot {
   // Fields are listed one by one so anything else on a Sim (a cache) never reaches the snapshot.
   const enemies = sim.enemies.map(({ def, pos, ...e }) => e);
   const mages = sim.mages.map(({ statsFor, ...m }) => m);
-  const snap: SimSnapshot = {
+  return {
     cfg: sim.cfg, tick: sim.tick, phase: sim.phase, wave: sim.wave, breakT: sim.breakT, phaseTick: sim.phaseTick,
     wavesCleared: sim.wavesCleared, livesAtClear: sim.livesAtClear, gold: sim.gold, lives: sim.lives, purchases: sim.purchases,
     mages, enemies, spawnQueue: sim.spawnQueue, nextId: sim.nextId, rejected: sim.rejected, kills: sim.kills,
     shatter: sim.shatter, zones: sim.zones, traps: sim.traps, spellCd: sim.spellCd,
     rng: sim.rng.state(), combatRng: sim.combatRng.state(),
   };
-  return JSON.parse(JSON.stringify(snap)) as SimSnapshot;
+}
+
+/** Plain-JSON copy of the sim's state (shares nothing with `sim`). */
+export function serializeSim(sim: Sim): SimSnapshot {
+  return JSON.parse(simToJson(sim)) as SimSnapshot;
+}
+
+/** The sim's snapshot as a JSON string (what the server stores), without an extra copy. */
+export function simToJson(sim: Sim): string {
+  return JSON.stringify(snapshotOf(sim));
 }
 
 /** Rebuilds a Sim from a snapshot (shares nothing with `snap`); it then steps exactly as the original would. */
 export function restoreSim(snap: SimSnapshot): Sim {
-  const s = JSON.parse(JSON.stringify(snap)) as SimSnapshot;
+  return fromOwnedSnapshot(JSON.parse(JSON.stringify(snap)) as SimSnapshot);
+}
+
+/**
+ * Rebuilds a Sim from simToJson's string (parsed once, no extra copy). `map`, when
+ * given, must be generateMap(seed) (the sim never changes its map), e.g. a stored
+ * copy: it saves regenerating it, the costliest part of a restore.
+ */
+export function simFromJson(json: string, map?: GameMap): Sim {
+  return fromOwnedSnapshot(JSON.parse(json) as SimSnapshot, map);
+}
+
+/** A Sim built on `s` itself (the caller hands over a snapshot nothing else holds). */
+function fromOwnedSnapshot(s: SimSnapshot, map?: GameMap): Sim {
+  if (map && map.seed !== s.cfg.seed) throw new Error("map of another seed");
   return {
-    cfg: s.cfg, map: generateMap(s.cfg.seed), rng: restoreRng(s.rng), combatRng: restoreRng(s.combatRng),
+    cfg: s.cfg, map: map ?? generateMap(s.cfg.seed), rng: restoreRng(s.rng), combatRng: restoreRng(s.combatRng),
     tick: s.tick, phase: s.phase, wave: s.wave, breakT: s.breakT, phaseTick: s.phaseTick,
     wavesCleared: s.wavesCleared, livesAtClear: s.livesAtClear, gold: s.gold, lives: s.lives, purchases: s.purchases,
     mages: s.mages, enemies: s.enemies, spawnQueue: s.spawnQueue, nextId: s.nextId, rejected: s.rejected, kills: s.kills,
@@ -149,40 +173,72 @@ export function validateActions(raw: unknown, fromTick: number, upTo: number, ma
 }
 
 /**
- * Last tick a chunk starting now may run to: CHUNK_SECS past the chunk start,
- * whatever the wave boundaries (so a stalled wave is verified over several chunks,
- * and idle time before wave 1 costs one bounded chunk per request).
+ * Why a chunk [from, upTo) of a run with `cfg` can't be verified, or null: a bad
+ * chunk end, a chunk longer than CHUNK_SECS, or one past the mode's tick limit.
  */
-export function chunkLimit(sim: Sim): number {
-  return sim.tick + secs(CHUNK_SECS);
+export function chunkBoundsError(cfg: SimConfig, from: number, upTo: number): string | null {
+  if (!Number.isInteger(upTo) || upTo < from) return "bad chunk end";
+  if (upTo > maxTicksFor(cfg)) return "chunk past the tick limit";
+  if (upTo > from + secs(CHUNK_SECS)) return "chunk too long";
+  return null;
 }
 
 /**
  * Steps `sim` from `sim.tick` to `upTo` (exclusive), feeding each tick its
- * actions (sorted, every `t` in [sim.tick, upTo)). Fails on a bad chunk end, a
- * chunk longer than chunkLimit or past the mode's tick limit, a game that ends
+ * actions (sorted, every `t` in [sim.tick, upTo)). Fails on bad chunk bounds
+ * (chunkBoundsError, counted from sim.tick), a game that ends
  * before `upTo`, and any action the sim refuses. Bad chunk bounds and action
  * lists are refused before stepping; after a failure mid-chunk the sim is part
  * way through and must be discarded.
  */
 export function advance(sim: Sim, actions: Action[], upTo: number): { ok: true } | { ok: false; error: string } {
-  if (!Number.isInteger(upTo) || upTo < sim.tick) return { ok: false, error: "bad chunk end" };
-  if (upTo > maxTicksFor(sim.cfg)) return { ok: false, error: "chunk past the tick limit" };
-  if (upTo > chunkLimit(sim)) return { ok: false, error: "chunk too long" };
+  const bounds = chunkBoundsError(sim.cfg, sim.tick, upTo);
+  if (bounds) return { ok: false, error: bounds };
   let prev = sim.tick;
   for (const a of actions) {
     if (!(a.t >= prev && a.t < upTo)) return { ok: false, error: "action outside the chunk" };
     prev = a.t;
   }
+  const res = advanceSome(sim, actions, upTo, Infinity);
+  return res.ok ? { ok: true } : res;
+}
+
+/**
+ * Work units one tick of `sim` costs: a deterministic stand-in for CPU time
+ * (Workers' clock doesn't move during CPU work), roughly proportional to it.
+ */
+export function tickWork(sim: Sim): number {
+  return 1 + sim.enemies.length + sim.mages.length + sim.zones.length;
+}
+
+/**
+ * Steps `sim` toward `upTo` with its chunk's actions, stopping once `budget` work
+ * units (tickWork per tick) are spent; at least one tick is stepped while
+ * `sim.tick < upTo`. Resumable: actions before `sim.tick` were fed by an earlier
+ * call and are skipped, so calling it again, also on a restored copy, continues
+ * exactly where it stopped. `actions` must be sorted with every `t` in [chunk
+ * start, upTo) (validateActions and chunkBoundsError check that on upload).
+ * `reached` says `upTo` was reached; after a failure the sim must be discarded.
+ */
+export function advanceSome(
+  sim: Sim,
+  actions: readonly Action[],
+  upTo: number,
+  budget: number,
+): { ok: true; reached: boolean; work: number } | { ok: false; error: string } {
   let next = 0;
+  while (next < actions.length && actions[next].t < sim.tick) next++;
+  let work = 0;
   const batch: Action[] = [];
   while (sim.tick < upTo) {
+    if (work > 0 && work >= budget) return { ok: true, reached: false, work };
     if (sim.phase === "won" || sim.phase === "lost") return { ok: false, error: "chunk runs past the end of the game" };
     batch.length = 0;
     while (next < actions.length && actions[next].t === sim.tick) batch.push(actions[next++]);
+    work += tickWork(sim);
     const rejected = sim.rejected;
     step(sim, batch);
     if (sim.rejected !== rejected) return { ok: false, error: "illegal action" };
   }
-  return { ok: true };
+  return { ok: true, reached: true, work };
 }
