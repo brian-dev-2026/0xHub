@@ -5,6 +5,7 @@ import type { Connect4Room } from "./games/connect4Room";
 import type { Duel2048Room } from "./games/duel2048Room";
 import type { SnakeRoom } from "./games/snakeRoom";
 import type { MinesRun, Run2048 } from "./games/soloRuns";
+import type { MageRun } from "./mages";
 import type { Matchmaker } from "./matchmaker";
 import type { BattleRoom } from "./room";
 
@@ -20,4 +21,5 @@ export interface Env {
   RUN2048: DurableObjectNamespace<Run2048>;
   CHESS_ROOM: DurableObjectNamespace<ChessRoom>;
   GENERALS_ROOM: DurableObjectNamespace<GeneralsRoom>;
+  MAGE_RUN: DurableObjectNamespace<MageRun>;
 }

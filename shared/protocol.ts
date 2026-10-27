@@ -207,8 +207,8 @@ export interface MeResponse {
 
 // ---------- other games ----------
 
-export type GameId = "snake" | "2048" | "mines" | "connect4" | "chess" | "generals";
-export const GAME_IDS: GameId[] = ["snake", "2048", "mines", "connect4", "chess", "generals"];
+export type GameId = "snake" | "2048" | "mines" | "connect4" | "chess" | "generals" | "mages";
+export const GAME_IDS: GameId[] = ["snake", "2048", "mines", "connect4", "chess", "generals", "mages"];
 
 export interface ScoreEntry {
   playerId: string;

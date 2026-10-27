@@ -158,6 +158,23 @@ export function GameLogo({ game, size = 48 }: { game: string; size?: number }) {
           ]}
         />
       );
+    case "mages":
+      return (
+        <Grid
+          cols={4}
+          rows={4}
+          size={size}
+          bg="#1e1b4b"
+          cells={[
+            { x: 0, y: 3, color: "#92400e" },
+            { x: 1, y: 2, color: "#b45309" },
+            { x: 2, y: 1, color: "#b45309" },
+            { x: 3, y: 0, color: "#c4b5fd", round: true },
+            { x: 2, y: 0, color: "#6d28d9", round: true },
+            { x: 3, y: 1, color: "#6d28d9", round: true },
+          ]}
+        />
+      );
     default:
       return <Grid cols={1} rows={1} size={size} cells={[]} />;
   }

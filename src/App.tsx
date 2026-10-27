@@ -18,8 +18,9 @@ import SnakePage from "./pages/games/Snake";
 import ChessPage from "./pages/games/Chess";
 import GeneralsPage from "./pages/games/Generals";
 
-// three.js is large, so pool loads only when someone opens it
+// three.js is large, so the 3D games load only when someone opens them
 const PoolPage = lazy(() => import("./pages/games/Pool"));
+const MagesPage = lazy(() => import("./pages/games/Mages"));
 
 export default function App() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
       <Route path="games/generals" element={<GeneralsPage />} />
       <Route path="games/generals/:code" element={<GeneralsPage />} />
       <Route path="games/pool" element={<Suspense fallback={null}><PoolPage /></Suspense>} />
+      <Route path="games/mages" element={<Suspense fallback={null}><MagesPage /></Suspense>} />
     </Routes>
     </AuthGate>
   );

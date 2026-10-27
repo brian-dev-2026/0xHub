@@ -23,6 +23,34 @@ export async function recordScore(
     .prepare(`INSERT INTO game_scores (user_id, game, mode, score, duration_ms, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .bind(userId, game, mode, Math.round(score), Math.round(durationMs), data === undefined ? null : JSON.stringify(data), Date.now())
     .run();
+  return bestAndRank(db, userId, game, mode, score);
+}
+
+/**
+ * recordScore for a verified run that may be recorded again after a crash or retry:
+ * the score is stored with its `runId` in `data`, and a second call for the same run adds nothing.
+ */
+export async function recordScoreOnce(
+  db: D1Database,
+  userId: string,
+  game: GameId,
+  mode: string,
+  score: number,
+  durationMs: number,
+  data: { runId: string } & Record<string, unknown>,
+): Promise<{ best: number; rank: number }> {
+  await db
+    .prepare(
+      `INSERT INTO game_scores (user_id, game, mode, score, duration_ms, data, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM game_scores WHERE user_id = ? AND game = ? AND mode = ? AND json_extract(data, '$.runId') = ?)`,
+    )
+    .bind(userId, game, mode, Math.round(score), Math.round(durationMs), JSON.stringify(data), Date.now(), userId, game, mode, data.runId)
+    .run();
+  return bestAndRank(db, userId, game, mode, score);
+}
+
+async function bestAndRank(db: D1Database, userId: string, game: GameId, mode: string, score: number): Promise<{ best: number; rank: number }> {
   const low = lowerIsBetter(game);
   const agg = low ? "MIN" : "MAX";
   const best =
@@ -258,6 +286,7 @@ const GAME_TITLE: Record<GameId, string> = {
   connect4: "Connect Four",
   chess: "Chess",
   generals: "Game of the Generals",
+  mages: "Mage Siege",
 };
 /** How a chess / Generals game ended, for history lines. */
 const REASON_TEXT: Record<string, string> = {
