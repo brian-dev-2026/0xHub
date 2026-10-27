@@ -16,7 +16,7 @@ async function call(path: string, body?: unknown, signal?: AbortSignal): Promise
   return data;
 }
 
-const api: MagesApi = {
+export const api: MagesApi = {
   progress: () => call("/api/mages/progress"),
   start: (body) => call("/api/mages/start", body),
   // Every upload or poll answer carries a boolean `ok`; anything else is a failed request (the player gets Retry)

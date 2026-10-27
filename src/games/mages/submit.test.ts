@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashSim } from "../../../shared/games/mages/replay";
 import { createSim, step, type Action, type Sim, type SimConfig, type SimEvent } from "../../../shared/games/mages/sim";
 import {
-  BEHIND_RETRY_MS, CHUNK_TICKS, LAG_TICKS, PLAY_POLL_EVERY_MS, PLAY_POLL_FAST_MS, POLL_EVERY_MS, POLL_FOR_MS, POST_EVERY_MS, REQUEST_TIMEOUT_MS, createRunSubmitter, loadPendingRun, savePendingRun, takePendingRun,
+  BEHIND_RETRY_MS, CHUNK_TICKS, LAG_TICKS, MAX_CHUNK_ACTIONS, PLAY_POLL_EVERY_MS, PLAY_POLL_FAST_MS, POLL_EVERY_MS, POLL_FOR_MS, POST_EVERY_MS, REQUEST_TIMEOUT_MS, createRunSubmitter, loadPendingRun, markVerifying, savePendingRun, takePendingRun, takeVerifying,
   type PendingBatch,
 } from "./submit";
 
@@ -30,7 +30,7 @@ function stubApi() {
       new Promise<unknown>((answer, fail) => calls.push({ batch: batch as PendingBatch, signal: opts?.signal, answer, fail })),
   };
 }
-const handlers = () => ({ onResult: vi.fn(), onReject: vi.fn(), onStatus: vi.fn(), onProgress: vi.fn(), onStored: vi.fn() });
+const handlers = () => ({ onResult: vi.fn(), onReject: vi.fn(), onStatus: vi.fn(), onProgress: vi.fn(), onStored: vi.fn(), onGiveUp: vi.fn() });
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
 /** Plays `ticks` ticks, logging `acts` (stamped with the tick they apply on) like the engine does, and reporting each tick. */
@@ -174,7 +174,7 @@ describe("deferred verification (Task 14b)", () => {
     return api.calls.length - 1;
   };
 
-  it("a stored final chunk is polled about once a second, with progress, until the finished result", async () => {
+  it("a stored final chunk is polled every POLL_EVERY_MS, with progress, until the finished result", async () => {
     const api = stubApi(), h = handlers(), sim = createSim(cfg);
     const sub = createRunSubmitter(api, "run-p", h);
     const i = await finalSent(api, sub, sim);
@@ -412,6 +412,123 @@ describe("deferred verification (Task 14b)", () => {
     sub2.drop();
     expect(api2.calls[0].signal!.aborted).toBe(true);
     expect(store.data.size).toBe(0);
+  });
+});
+
+describe("edge cases (final-fix carry)", () => {
+  const pending = (verifiedTo: number, queuedTo: number) => ({ ok: true, pending: true, verifiedTo, queuedTo });
+
+  it("uploads before the actions outgrow a chunk (1900 of the 2000 allowed)", async () => {
+    const sent: PendingBatch[] = [];
+    const api = { input: async (_id: string, b: unknown) => { sent.push(b as PendingBatch); return pending(0, 0); } };
+    const sim = createSim(cfg), log: Action[] = [];
+    const sub = createRunSubmitter(api, "run-a", handlers());
+    // Build-phase ticks (no time-based upload), many logged actions per tick
+    for (let i = 0; i < 40 && sent.length === 0; i++) {
+      for (let k = 0; k < 50; k++) log.push({ t: sim.tick, type: "startWave" } as Action);
+      sub.afterTick(sim, log, step(sim, []));
+    }
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].actions.length).toBe(MAX_CHUNK_ACTIONS - 100);
+  });
+
+  it("no polls while idle (hidden or paused), including the retry:true hold; they resume when active again", async () => {
+    const api = stubApi(), h = handlers(), sim = createSim(cfg);
+    const sub = createRunSubmitter(api, "run-i", h);
+    step(sim, []);
+    sub.afterTick(sim, [], [{ type: "waveEnd", wave: 1, bonus: 25 }]);
+    await flush();
+    api.calls[0].answer({ ok: false, error: "Verification is behind: send this again later", retry: true });
+    await flush();
+    sub.setIdle(true);
+    await vi.advanceTimersByTimeAsync(BEHIND_RETRY_MS * 4);
+    expect(api.calls).toHaveLength(1); // neither polls nor the resend
+    sub.setIdle(false);
+    await flush();
+    expect(api.calls).toHaveLength(2);
+    expect(api.calls[1].batch).toEqual({ poll: true });
+    api.calls[1].answer(pending(0, 30));
+    await flush();
+
+    // After the final chunk: results polling pauses while hidden and resumes at once
+    const api2 = stubApi(), h2 = handlers(), sim2 = createSim(cfg);
+    const sub2 = createRunSubmitter(api2, "run-j", h2);
+    step(sim2, []);
+    sub2.finish(sim2, []);
+    await flush();
+    api2.calls[0].answer(pending(0, 30));
+    await flush();
+    sub2.setIdle(true);
+    await vi.advanceTimersByTimeAsync(POLL_FOR_MS * 2);
+    expect(api2.calls).toHaveLength(1);
+    expect(h2.onGiveUp).not.toHaveBeenCalled(); // time while hidden doesn't count
+    sub2.setIdle(false);
+    await flush();
+    expect(api2.calls[1].batch).toEqual({ poll: true });
+  });
+
+  it("gives up polling after POLL_FOR_MS and says so (onGiveUp), instead of spinning forever", async () => {
+    const api = stubApi(), h = handlers(), sim = createSim(cfg);
+    const sub = createRunSubmitter(api, "run-g", h);
+    step(sim, []);
+    sub.finish(sim, []);
+    await flush();
+    api.calls[0].answer(pending(0, 30));
+    for (let t = 0; t <= POLL_FOR_MS + 5 * POLL_EVERY_MS; t += POLL_EVERY_MS) {
+      await vi.advanceTimersByTimeAsync(POLL_EVERY_MS);
+      const last = api.calls[api.calls.length - 1];
+      if (last.batch.poll) last.answer(pending(0, 30));
+    }
+    await flush();
+    expect(h.onGiveUp).toHaveBeenCalledTimes(1);
+    expect(sub.done).toBe(false);
+  });
+
+  it("only clears the pending store when it holds its own run", async () => {
+    const api = stubApi(), h = handlers(), sim = createSim(cfg);
+    const old = createRunSubmitter(api, "run-old", h);
+    step(sim, []);
+    old.finish(sim, []);
+    await flush();
+    // A newer run saved its batches meanwhile
+    const mine = { runId: "run-new", batches: [{ upTo: 9, actions: [], h: 1, final: true }] };
+    savePendingRun(mine);
+    api.calls[0].answer({ ok: true, finished: true, outcome: {} });
+    await flush();
+    expect(loadPendingRun()).toEqual(mine);
+    old.drop();
+    expect(loadPendingRun()).toEqual(mine);
+  });
+
+  it("detach() aborts a poll in flight (uploads carry on); stop() aborts anything", async () => {
+    const api = stubApi(), sim = createSim(cfg);
+    const sub = createRunSubmitter(api, "run-x", handlers());
+    step(sim, []);
+    sub.finish(sim, []);
+    await flush();
+    api.calls[0].answer(pending(0, 30));
+    await vi.advanceTimersByTimeAsync(POLL_EVERY_MS);
+    expect(api.calls[1].batch).toEqual({ poll: true });
+    sub.detach();
+    expect(api.calls[1].signal!.aborted).toBe(true);
+
+    const api2 = stubApi(), sub2 = createRunSubmitter(api2, "run-y", handlers()), sim2 = createSim(cfg);
+    step(sim2, []);
+    sub2.finish(sim2, []);
+    await flush();
+    sub2.detach(); // the final upload is not stored yet: it keeps going
+    expect(api2.calls[0].signal!.aborted).toBe(false);
+  });
+
+  it("marks a run still verifying, for the next mount", () => {
+    expect(takeVerifying()).toBeNull();
+    markVerifying("run-v");
+    expect(takeVerifying()).toBe("run-v");
+    expect(takeVerifying()).toBeNull();
+    markVerifying("run-w");
+    vi.advanceTimersByTime(60 * 60 * 1000 + 1);
+    expect(takeVerifying()).toBeNull(); // too old to matter
   });
 });
 

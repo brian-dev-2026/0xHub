@@ -399,7 +399,7 @@ export function createUI(rootEl, on) {
 
   // ---------- Results ----------
   /**
-   * opts: { mode, stage, won, outcome (local until verified), state: 'verify' | 'done' | 'failed' | 'rejected', verify? (0..1),
+   * opts: { mode, stage, won, outcome (local until verified), state: 'verify' | 'waiting' (polling gave up; the server still records it) | 'done' | 'failed' | 'rejected', verify? (0..1),
    * error?, stars?, newUnlocks?: { mages, traps, spells, endless }, score?, best?, rank? }
    */
   function results(o) {
@@ -424,12 +424,13 @@ export function createUI(rootEl, on) {
       </div></div>` : '';
     const status = o.state === 'verify'
       ? `<div class="verify"><div class="status"><span class="spin"></span>Verifying your score…</div><div class="vbar"><i id="vfill" style="--f:${(o.verify || 0).toFixed(3)}"></i></div></div>`
+      : o.state === 'waiting' ? `<div class="status">${o.mode === 'endless' ? 'Your score will appear on the leaderboard in a minute' : 'Your stars will be saved in a minute'}</div>`
       : o.state === 'failed' ? `<div class="status bad">Couldn't save your result.</div>`
         : rejected ? `<div class="status bad">${esc(friendlyError(o.error))}</div>` : '';
     const canNext = done && !endless && o.won && o.stage < 5;
     const buttons = rejected ? `<button class="btn primary" data-act="map">${ICON.map}World map</button>`
       : o.state === 'failed' ? `<button class="btn" data-act="map">${ICON.map}Later</button><button class="btn primary" data-act="resend">${ICON.retry}Retry</button>`
-        : `<button class="btn" data-act="map">${ICON.map}Map</button><button class="btn ${canNext ? '' : 'primary'}" data-act="retry" ${done ? '' : 'disabled'}>${ICON.retry}${endless ? 'Again' : 'Retry'}</button>${canNext ? `<button class="btn primary" data-act="next">Next${ICON.next}</button>` : ''}`;
+        : `<button class="btn" data-act="map">${ICON.map}Map</button><button class="btn ${canNext ? '' : 'primary'}" data-act="retry" ${done || o.state === 'waiting' ? '' : 'disabled'}>${ICON.retry}${endless ? 'Again' : 'Retry'}</button>${canNext ? `<button class="btn primary" data-act="next">Next${ICON.next}</button>` : ''}`;
     sheet.innerHTML = `<span class="label">${kicker}</span><h2>${title}</h2>
       ${!endless && !rejected ? starRow(stars, 'bigstars') : ''}
       ${rejected ? '' : `<div class="facts">${facts}</div>`}

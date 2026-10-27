@@ -12,7 +12,7 @@ import { createFx } from './fx';
 import { createInput } from './input';
 import { createScene, loadQuality, QUALITY, saveQuality } from './scene';
 import { buildTerrain } from './terrain';
-import { createRunSubmitter, takePendingRun } from './submit';
+import { clearVerifying, createRunSubmitter, markVerifying, takePendingRun, takeVerifying } from './submit';
 import { MAGE_COLOR, createUI, friendlyError } from './ui';
 import { UI_CSS } from './ui-style';
 import { createUnits } from './units';
@@ -123,8 +123,8 @@ export function mountMages(host, { onExit, api }) {
     actionLog: () => log,
     setSpeed(n) { speed = n === 2 ? 2 : 1; },
     getSpeed: () => speed,
-    pause() { paused = true; },
-    resume() { paused = false; },
+    pause() { paused = true; syncIdle(); },
+    resume() { paused = false; syncIdle(); },
     isPaused: () => paused || hidden,
     /** Calls cb(events, sim) after every tick that produced events; returns an unsubscribe function. */
     onEvents(cb) { listeners.push(cb); return () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); }; },
@@ -158,6 +158,14 @@ export function mountMages(host, { onExit, api }) {
   let run = null;
   /** An earlier run (from a past visit, or a result left unsaved) whose chunks are still being sent. */
   let leftover = null, leftoverFailed = false;
+  /** Submitters nobody follows any more (a detached result, a replaced leftover): stopped on unmount. */
+  const orphans = new Set();
+  /** No polls while the page is hidden or the game paused (the results screen is not a pause). */
+  function syncIdle() {
+    const idle = hidden || (paused && screenName === 'play');
+    if (run) run.submit.setIdle(idle);
+    if (leftover) leftover.setIdle(idle);
+  }
   let lastTeam = [];
   try { lastTeam = JSON.parse(localStorage.getItem(TEAM_KEY) || '[]'); } catch (e) { /* storage blocked */ }
   if (!Array.isArray(lastTeam)) lastTeam = [];
@@ -274,7 +282,7 @@ export function mountMages(host, { onExit, api }) {
     showMap(s.map);
     run = { runId, cfg, submit: createRunSubmitter(api, runId, submitHandlers(runId)), over: false, offline: false, results: null };
     screenName = 'play';
-    paused = false; running = true;
+    paused = false; running = true; syncIdle();
     setMode(null); closeInfo();
     ui.showHud(cfg);
     view.resetZoom();
@@ -295,7 +303,7 @@ export function mountMages(host, { onExit, api }) {
       } else run.submit.finish(sim, log);
       // Let the last moment play out before the results cover the board
       const r = run;
-      later(() => { if (run === r && screenName === 'play') { screenName = 'results'; ui.results(r.results); } }, END_PAUSE_MS);
+      later(() => { if (run === r && screenName === 'play') { screenName = 'results'; syncIdle(); ui.results(r.results); } }, END_PAUSE_MS);
       return;
     }
     run.submit.afterTick(sim, log, evs);
@@ -308,6 +316,8 @@ export function mountMages(host, { onExit, api }) {
     const offWorld = () => { if (screenName === 'world') showWorld(); };
     return {
       onResult(res) {
+        if (!alive) return;
+        clearVerifying(runId);
         applyResult(res);
         if (!mine()) { if (leftover && leftover.runId === runId) leftover = null; ui.toast('Your last result was saved'); offWorld(); return; }
         const o = res.outcome;
@@ -316,6 +326,8 @@ export function mountMages(host, { onExit, api }) {
         if (screenName === 'results') ui.results(run.results);
       },
       onReject(error) {
+        if (!alive) return;
+        clearVerifying(runId);
         if (!mine()) {
           if (leftover && leftover.runId === runId) leftover = null;
           ui.toast(friendlyError(error).replace('This run', 'Your last run'), true);
@@ -331,19 +343,26 @@ export function mountMages(host, { onExit, api }) {
       },
       onStored() {
         // The final chunk is on the server: nothing can be lost now, verification just takes a moment
-        if (mine()) return;
+        if (!alive || mine()) return;
         if (leftover && leftover.runId === runId) { leftover = null; leftoverFailed = false; }
         ui.toast(savedSoonText(leftModes.get(runId)));
         refreshProgressSoon();
         offWorld();
       },
       onProgress(verifiedTo, queuedTo) {
-        if (!mine() || !run.results) return;
+        if (!alive || !mine() || !run.results) return;
         // A cold server instance resumes from its last checkpoint, so verifiedTo can step back: the bar never does
         run.results.verify = Math.max(run.results.verify || 0, queuedTo > 0 ? Math.min(1, verifiedTo / queuedTo) : 0);
         if (screenName === 'results') ui.verifyProgress(run.results.verify);
       },
+      onGiveUp() {
+        // Polling stopped after a few minutes: the server still records the run, so say that instead of spinning forever
+        if (!alive || !mine() || !run.results || run.results.state !== 'verify') return;
+        run.results.state = 'waiting';
+        if (screenName === 'results') ui.results(run.results);
+      },
       onStatus(state, final) {
+        if (!alive) return;
         if (!mine()) { leftoverFailed = state === 'failed'; offWorld(); return; }
         run.offline = state === 'failed';
         if (run.results && final && state === 'failed') { run.results.state = 'failed'; if (screenName === 'results') ui.results(run.results); }
@@ -368,15 +387,18 @@ export function mountMages(host, { onExit, api }) {
     if (r.submit.finalStored && !r.submit.done) {
       // Leaving while the server still verifies: it finishes and records the run on its own (R43)
       r.submit.detach();
+      orphans.add(r.submit);
+      markVerifying(r.runId);
       ui.toast(savedSoonText(r.cfg.mode));
       refreshProgressSoon();
     } else if (r.submit.unsent) {
       // Leaving with the result unsaved: its submitter carries on from the world map
+      if (leftover) { leftover.detach(); orphans.add(leftover); }
       leftover = r.submit; leftoverFailed = r.results.state === 'failed';
       leftModes.set(r.runId, r.cfg.mode);
       leftover.detach();
     }
-    run = null;
+    run = null; syncIdle();
     backdrop(r.cfg);
     showWorld();
     if (act === 'retry') startRun(r.cfg.mode, r.cfg.stage, r.cfg.team);
@@ -601,10 +623,13 @@ export function mountMages(host, { onExit, api }) {
   const pending = takePendingRun();
   if (pending) {
     leftover = createRunSubmitter(api, pending.runId, submitHandlers(pending.runId), pending.batches);
+    syncIdle();
     leftover.detach(); // once the server has it, the server finishes it; the world map only refreshes progress
     leftover.retry();
     showWorld();
   }
+  // A run the last visit left while the server was still verifying it: pick up its stage unlock without a reload
+  if (takeVerifying()) refreshProgressSoon();
   later(makePortraits, 60);
 
   listen(window, 'resize', relayout);
@@ -612,7 +637,7 @@ export function mountMages(host, { onExit, api }) {
   // Review Focus 2: a hidden page stops the clock (some browsers still fire rAF in the background, and the first
   // frame back must not catch up on the time away); during a run it also opens the pause menu
   listen(document, 'visibilitychange', () => {
-    hidden = document.hidden; last = performance.now();
+    hidden = document.hidden; last = performance.now(); syncIdle();
     if (hidden) openPause();
   });
   listen(window, 'keydown', e => {
@@ -741,8 +766,12 @@ export function mountMages(host, { onExit, api }) {
     for (const t of timers) clearTimeout(t);
     for (const [target, type, fn] of unlisten) target.removeEventListener(type, fn);
     // Unsent chunks stay in storage for the next visit
-    if (run) run.submit.stop();
+    if (run) {
+      if (run.submit.finalStored && !run.submit.done) markVerifying(run.runId); // still verifying: the next mount refreshes
+      run.submit.stop();
+    }
     if (leftover) leftover.stop();
+    for (const o of orphans) o.stop();
     input.dispose();
     fx.dispose();
     units.dispose();

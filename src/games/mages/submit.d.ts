@@ -15,6 +15,9 @@ export function savePendingRun(run: PendingRun): void;
 export function loadPendingRun(): PendingRun | null;
 export function clearPendingRun(): void;
 export function takePendingRun(): PendingRun | null;
+export function markVerifying(runId: string): void;
+export function takeVerifying(): string | null;
+export function clearVerifying(runId: string): void;
 
 export const POST_EVERY_MS: number;
 export const PLAY_POLL_EVERY_MS: number;
@@ -36,6 +39,7 @@ export interface SubmitHandlers {
   onStatus(state: "ok" | "failed", final: boolean): void;
   onProgress?(verifiedTo: number, queuedTo: number): void;
   onStored?(): void;
+  onGiveUp?(): void;
 }
 export interface RunSubmitter {
   readonly runId: string;
@@ -43,6 +47,7 @@ export interface RunSubmitter {
   finish(sim: Sim, log: readonly unknown[]): void;
   retry(): void;
   detach(): void;
+  setIdle(on: boolean): void;
   readonly finalStored: boolean;
   readonly done: boolean;
   readonly unsent: boolean;
