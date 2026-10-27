@@ -8,7 +8,8 @@ import { restoreRng, makeRng } from "./rng";
 import { createSim, spawnForTest, step, type Action, type Sim } from "./sim";
 
 // hashSim after every waveEnd, recorded before the Task 9b optimisations; they must never change.
-const PINNED_STAGE = [3601999107, 1188798360, 4106379626, 179245956, 2662650875, 4217634880, 249232307, 1173117219, 2874727905, 1290134735];
+// Balance pass (R48): the last entry moved (wave 10 holds the stage 1 Goblin Chief, which no longer takes the per-wave HP multiplier); waves 1-9 are unchanged.
+const PINNED_STAGE = [3601999107, 1188798360, 4106379626, 179245956, 2662650875, 4217634880, 249232307, 1173117219, 2874727905, 3525209696];
 const PINNED_COST = [
   3352686040, 240505946, 672427469, 3322958229, 3290635155, 911106497, 1084268685, 151215908, 4179492026, 2712223502, 1237959825, 1608248984,
   1875746316, 1328541775, 3928480562, 160022460, 397047408, 3223786170, 3100014500, 2198354000, 2689696569, 735439716, 967625006, 2988661482,

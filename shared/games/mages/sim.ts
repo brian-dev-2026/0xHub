@@ -3,7 +3,7 @@
 // events step() returns; gameplay changes only through actions.
 
 import {
-  BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
+  BUILD_BREAK_SECS, ECON, MAX_LEVEL, ENDLESS_MAX_WAVES, ENDLESS_WAVE_HP, ENEMIES, LIVES, BOSS_WAVE_HP, GOLD_STAGE, STAGE_HP, STARS, TERRAIN_BOOST, TICK_HZ, WAVE_HP, secs,
   enemyDef, type EnemyDef, type EnemyId, type MageId, type SpellId, type TrapId,
 } from "./data";
 import { castActive, wallStop, zoneTick } from "./actives";
@@ -231,11 +231,16 @@ export function stars(sim: Sim): 0 | 1 | 2 | 3 {
   return 1;
 }
 
+/** Gold multiplier for kills and wave bonuses: grows per stage in stage mode, 1 in Endless. */
+function goldScale(sim: Sim): number {
+  return sim.cfg.mode === "endless" ? 1 : powi(GOLD_STAGE, sim.cfg.stage - 1);
+}
+
 /** HP multiplier for enemies of the current wave. */
-function hpScale(sim: Sim): number {
+function hpScale(sim: Sim, boss = false): number {
   const w = Math.max(1, sim.wave) - 1;
   if (sim.cfg.mode === "endless") return powi(ENDLESS_WAVE_HP, w);
-  return powi(STAGE_HP, sim.cfg.stage - 1) * powi(WAVE_HP, w);
+  return powi(STAGE_HP, sim.cfg.stage - 1) * powi(boss ? BOSS_WAVE_HP : WAVE_HP, w);
 }
 
 const freshStatus = (): Status => ({
@@ -245,9 +250,9 @@ const freshStatus = (): Status => ({
 
 export function spawnEnemy(sim: Sim, kind: EnemyId, d: number): Enemy {
   const def = ENEMIES[kind];
-  const hp = def.hp * hpScale(sim);
+  const hp = def.hp * hpScale(sim, def.boss !== null || kind === "sapling");
   const e: Enemy = {
-    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: def.gold, abil: freshAbilities(kind, sim.tick),
+    id: sim.nextId++, kind, hp, maxHp: hp, armor: def.armor, d, speed: def.speed, order: Math.floor(d + 0.5), status: freshStatus(), gold: Math.round(def.gold * goldScale(sim)), abil: freshAbilities(kind, sim.tick),
     def, pos: undefined,
   };
   sim.enemies.push(e);
@@ -414,7 +419,7 @@ function leak(sim: Sim, ev: SimEvent[]): void {
 function checkWaveEnd(sim: Sim, ev: SimEvent[]): void {
   // A run lost this tick gets no wave bonus.
   if (sim.phase !== "wave" || sim.lives <= 0 || sim.spawnQueue.length > 0 || sim.enemies.length > 0) return;
-  const bonus = ECON.waveBonus(sim.wave);
+  const bonus = Math.round(ECON.waveBonus(sim.wave) * goldScale(sim));
   sim.gold += bonus;
   ev.push({ type: "waveEnd", wave: sim.wave, bonus });
   sim.phase = "build";

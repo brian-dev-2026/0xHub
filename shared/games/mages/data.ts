@@ -217,7 +217,7 @@ export const ABILITIES = {
   /** Saplings never sit closer than this to the exit, so they cannot leak. */
   saplingEndMargin: 0.5,
   treantHealSecs: 1,
-  treantHealPctPerSapling: 0.02,
+  treantHealPctPerSapling: 0.01,
   treantSlamSecs: 15,
   treantSlamTargets: 3,
   treantSlamStunSecs: 3,
@@ -289,6 +289,10 @@ export const BUILD_BREAK_SECS = 12;
 export const STAGE_HP = 1.35;
 export const WAVE_HP = 1.1;
 export const ENDLESS_WAVE_HP = 1.12;
+/** Kill gold and wave bonus multiplier per stage (stage mode only; Endless pays the stage 1 rates). */
+export const GOLD_STAGE = 1.35;
+/** Per-wave HP multiplier for stage-mode bosses and the Treant's saplings (they scale by stage only: 1). */
+export const BOSS_WAVE_HP = 1;
 /** Endless runs end (won) after this many waves. */
 export const ENDLESS_MAX_WAVES = 300;
 /** Spike and mine damage multiplier per stage. */

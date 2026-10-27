@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENEMIES, STAGE_HP, secs, type EnemyId, type MageId } from "./data";
+import { ENEMIES, GOLD_STAGE, STAGE_HP, secs, type EnemyId, type MageId } from "./data";
 import { combatTick } from "./combat";
 import { pathLength, pathPoint } from "./map";
 import { applyAction, createSim, spawnForTest, step, type Enemy, type Mage, type Sim, type SimEvent } from "./sim";
@@ -226,7 +226,7 @@ describe("ancient treant", () => {
     expect(sim.lives).toBe(20);
   });
 
-  it("saplings heal treant 2% per second each", () => {
+  it("saplings heal treant 1% per second each", () => {
     const sim = newSim(5);
     const t = foe(sim, "treant", 10, 10000);
     t.status.freezeT = 1e6; // hold it still (skills still run)
@@ -239,7 +239,7 @@ describe("ancient treant", () => {
     run(sim, secs(1));
     expect(t.hp).toBe(5000);
     run(sim, 1);
-    expect(t.hp).toBeCloseTo(5000 + 2 * 0.02 * 10000, 6);
+    expect(t.hp).toBeCloseTo(5000 + 2 * 0.01 * 10000, 6);
     t.hp = 9900;
     run(sim, secs(1));
     expect(t.hp).toBe(10000); // capped
@@ -262,7 +262,7 @@ describe("ancient treant", () => {
     expect(sim.enemies).toHaveLength(0);
     // Withered, not killed: one kill (the Treant), no sapling gold, a despawn event each.
     expect(sim.kills).toBe(1);
-    expect(sim.gold).toBe(gold + ENEMIES.treant.gold);
+    expect(sim.gold).toBe(gold + Math.round(ENEMIES.treant.gold * GOLD_STAGE ** 4));
     expect(ev.filter((x) => x.type === "kill").map((x) => (x as { enemy: number }).enemy)).toEqual([t.id]);
     expect(ev.filter((x) => x.type === "despawn").map((x) => (x as { enemy: number }).enemy)).toEqual(ids);
   });
@@ -285,8 +285,8 @@ describe("ancient treant", () => {
     plant(a, 1);
     plant(b, 3);
     run(sim, secs(1) + 1);
-    expect(a.hp).toBeCloseTo(5000 + 0.02 * 10000, 6);
-    expect(b.hp).toBeCloseTo(5000 + 3 * 0.02 * 10000, 6);
+    expect(a.hp).toBeCloseTo(5000 + 0.01 * 10000, 6);
+    expect(b.hp).toBeCloseTo(5000 + 3 * 0.01 * 10000, 6);
     a.hp = 0;
     run(sim, 1);
     expect(sim.enemies.filter((e) => e.kind === "sapling" && e.owner === b.id)).toHaveLength(3);

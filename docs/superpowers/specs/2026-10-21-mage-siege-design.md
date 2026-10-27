@@ -69,8 +69,8 @@ This spec covers **Phase 1**: the complete engine plus World 1 and Endless mode.
 ## Economy
 
 - **Starting gold:** 120.
-- **Kill gold:** set per enemy type (below). Ruins add +50% for that mage's kills.
-- **Wave bonus:** 20 + 5 × wave number, paid when a wave ends.
+- **Kill gold:** set per enemy type (below). Ruins add +50% for that mage's kills. In stage mode kill gold is multiplied ×1.35 per stage (the same rate as enemy health, rounded to whole gold); Endless pays the stage 1 amounts.
+- **Wave bonus:** 20 + 5 × wave number, paid when a wave ends, with the same ×1.35 per stage in stage mode.
 - **Mage price:** 50 for the first purchase in a stage, +10 for each purchase after that (any mage).
 - **Selling:** refunds 50% of the gold spent on that mage, including both halves of any merge.
 - **Traps:** fixed price per type; at most 6 traps on the path at once.
@@ -114,7 +114,7 @@ This spec covers **Phase 1**: the complete engine plus World 1 and Endless mode.
 
 ## Enemies (World 1)
 
-Health and speed below are for stage 1. Health scales ×1.10 per wave and ×1.35 per stage. Armor reduces each hit by its value (minimum 1 damage).
+Health, speed and gold below are for stage 1. Health scales ×1.10 per wave and ×1.35 per stage; gold scales ×1.35 per stage. Bosses (mini-bosses and the Treant, and its saplings) scale by stage only, not per wave, because they appear on wave 10 only. Armor reduces each hit by its value (minimum 1 damage).
 
 | Enemy | HP | Speed (tiles/s) | Armor | Gold | Trait |
 |---|---|---|---|---|---|
@@ -132,7 +132,7 @@ Health and speed below are for stage 1. Health scales ×1.10 per wave and ×1.35
 - *Troll* (stage 3): regenerates 1% max HP per second unless poisoned or burning.
 - *Witch* (stage 4): every 7 s, shields all enemies within 2 tiles for 3 s (they take 50% damage).
 
-**Ancient Treant** (stage 5, wave 10): ×40 health, armor 6, speed 0.5. Every 10 s it plants 3 saplings on path tiles ahead of it. Saplings are stationary enemies with 200 HP (scaled like other enemies) that don't cost lives; while any sapling is alive, the Treant heals 2% of its max HP per second per sapling. Every 15 s, *Root Slam*: stuns the 3 mages nearest the path near it for 3 s (they can't attack or cast). Below 50% HP it moves 30% faster.
+**Ancient Treant** (stage 5, wave 10): ×40 health, armor 6, speed 0.5. Every 10 s it plants 3 saplings on path tiles ahead of it. Saplings are stationary enemies with 200 HP (scaled by stage like the Treant) that don't cost lives; while any sapling is alive, the Treant heals 1% of its max HP per second per sapling. Every 15 s, *Root Slam*: stuns the 3 mages nearest the path near it for 3 s (they can't attack or cast). Below 50% HP it moves 30% faster.
 
 ### Waves
 
