@@ -27,10 +27,13 @@ const MAX_WAVE_SECS = 120;
 export const CHUNK_SECS = 150;
 const TILES = W * H;
 
-/** Tick limit for a run: every wave of the mode at maximum length. */
+/** Untimed waiting before wave 1 that a run may spend on top of its waves (an unpaused, idle first screen). */
+const PRE_WAVE_SECS = 3600;
+
+/** Tick limit for a run: every wave of the mode at maximum length, plus an hour of waiting before wave 1. */
 export function maxTicksFor(cfg: SimConfig): number {
   const waves = cfg.mode === "endless" ? ENDLESS_MAX_WAVES : STAGE_WAVES[cfg.stage].length;
-  return waves * secs(MAX_WAVE_SECS);
+  return waves * secs(MAX_WAVE_SECS) + secs(PRE_WAVE_SECS);
 }
 
 /** The result of the game so far (final once the sim is won or lost). */

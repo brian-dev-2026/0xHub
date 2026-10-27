@@ -131,7 +131,7 @@ export const MAX_QUEUE_BYTES = 256_000;
 /** Storing the run at a checkpoint costs one work unit per this many bytes of queued chunks (JSON). */
 export const QUEUE_BYTES_PER_WORK = 64;
 /** An idle run (no upload for this long, nothing waiting) is discarded; a finished one keeps its result this long. */
-export const ABANDON_AFTER_MS = 60 * 60 * 1000;
+export const ABANDON_AFTER_MS = 24 * 60 * 60 * 1000;
 /** Each upload arms the alarm this far ahead, so verification goes on if the page goes away. */
 export const BACKSTOP_MS = 15_000;
 /** An alarm finding a slice driven by a request this recently leaves the work to the requests. */

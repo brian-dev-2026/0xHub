@@ -118,8 +118,9 @@ describe("mage siege chunks", () => {
     stepTo(bad, [], 10);
     expect(advance(bad, [], 9)).toEqual({ ok: false, error: "bad chunk end" });
 
-    // Never past the tick limit of the mode.
+    // Never past the tick limit of the mode, which leaves room for an hour idle before wave 1.
     const max = maxTicksFor(stageCfg());
+    expect(max).toBeGreaterThanOrEqual(secs(10 * 120 + 3600));
     const late = restoreSim({ ...serializeSim(createSim(stageCfg())), tick: max - 10 });
     expect(advance(late, [], max + 1)).toEqual({ ok: false, error: "chunk past the tick limit" });
     expect(advance(late, [], max)).toEqual({ ok: true });

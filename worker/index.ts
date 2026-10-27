@@ -436,7 +436,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (!mode) return err("Unknown mode.");
     const stage = mode === "endless" ? 1 : b.stage;
     if (typeof stage !== "number" || !Number.isInteger(stage) || stage < 1 || stage > 5) return err("Stage must be 1–5.");
-    await limit(env, `run-start:${u.id}`, 300, HOUR);
+    // Each start writes a few Durable Object rows (free plan: 100k a day, account-wide), so keep this tighter than other games.
+    await limit(env, `mages-start:${u.id}`, 60, HOUR);
     const progress = await getProgress(env.DB, u.id);
     const why = checkStart(progress, mode, stage, b.team);
     if (why) return err(why[0].toUpperCase() + why.slice(1) + ".");
