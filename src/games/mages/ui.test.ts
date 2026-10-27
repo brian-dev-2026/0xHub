@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearPendingRun, loadPendingRun, savePendingRun } from "./ui";
+import { bossHpText, clearPendingRun, loadPendingRun, savePendingRun } from "./ui";
 
 /** A minimal in-memory localStorage. */
 function memoryStorage() {
@@ -60,5 +60,16 @@ describe("pending run storage", () => {
     expect(loadPendingRun()).toBeNull();
     store.setItem("0xhubms.pending", JSON.stringify({ runId: 5, batches: "x" }));
     expect(loadPendingRun()).toBeNull();
+  });
+});
+
+describe("boss bar text", () => {
+  it("never shows more HP than the maximum, for fractional HP", () => {
+    // Scaled boss HP is fractional (e.g. 480 x 1.1^9 = 1131.79...); a full-health boss used to read "1,132 / 1,131"
+    const max = 480 * 1.1 ** 9;
+    expect(bossHpText(max, max)).toBe("1,132 / 1,132");
+    expect(bossHpText(max - 0.5, max)).toBe("1,132 / 1,132");
+    expect(bossHpText(1000.2, max)).toBe("1,001 / 1,132");
+    expect(bossHpText(-3, max)).toBe("0 / 1,132");
   });
 });

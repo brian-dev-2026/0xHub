@@ -10,6 +10,8 @@ export function describeMage(kind: MageId, level: number): { passive: { name: st
 
 /** What a server refusal means for the player (never the raw reason). */
 export function friendlyError(error: unknown): string;
+/** Boss bar numbers, "hp / max", both rounded up. */
+export function bossHpText(hp: number, maxHp: number): string;
 
 /** The player's choices reported by the screens and HUD. */
 export interface UICallbacks {

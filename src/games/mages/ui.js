@@ -86,6 +86,8 @@ export function friendlyError(error) {
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = n => Math.floor(n).toLocaleString('en-US');
+/** Boss bar numbers: both rounded up, so a full-health boss never reads more HP than its maximum. */
+export const bossHpText = (hp, maxHp) => `${fmt(Math.max(0, Math.ceil(hp)))} / ${fmt(Math.ceil(maxHp))}`;
 
 // ================= Markup =================
 const MARKUP = `
@@ -288,7 +290,7 @@ export function createUI(rootEl, on) {
     });
     if (boss) {
       const f = Math.max(0, boss.hp / boss.maxHp);
-      set('bossF', Math.round(f * 400), () => { $('bossFill').style.setProperty('--f', f.toFixed(4)); $('bossHp').textContent = `${fmt(Math.max(0, Math.ceil(boss.hp)))} / ${fmt(boss.maxHp)}`; });
+      set('bossF', Math.round(f * 400), () => { $('bossFill').style.setProperty('--f', f.toFixed(4)); $('bossHp').textContent = bossHpText(boss.hp, boss.maxHp); });
     }
 
     // Wave button: Start before wave 1, Next wave (with the break countdown) between waves, enemies left during a wave
